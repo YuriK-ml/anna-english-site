@@ -129,26 +129,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <style>
+        :root {
+            --bg: rgba(0,0,0,0.58);
+            --bg-2: rgba(0,0,0,0.70);
+            --border: rgba(255,255,255,0.08);
+            --text-muted: rgba(255,255,255,0.78);
+            --accent: #3498db;
+            --accent-2: #2c80b4;
+        }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif;
             text-align: center;
-            padding: 50px;
+            margin: 0;
+            padding: 0;
             background-image: url('images/London.webp');
             background-repeat: no-repeat;
             background-position: center center;
             background-attachment: fixed;
             background-size: cover;
+            background-color: #070a0f;
             color: #fff;
         }
 
         h1 { text-shadow: 1px 1px 4px #000; }
         p { font-size: 18px; text-shadow: 1px 1px 3px #000; }
 
+        .page {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 28px 16px 64px;
+        }
+
         .section {
-            margin: 40px 0;
-            background-color: rgba(0,0,0,0.6);
-            padding: 25px;
+            margin: 22px 0;
+            background-color: var(--bg);
+            padding: 22px;
             border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.35);
         }
 
         .cards {
@@ -175,17 +194,151 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
             margin-top: 10px;
             font-size: 15px;
             color: #fff;
-            background-color: #3498db;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
             text-decoration: none;
             border-radius: 8px;
             transition: 0.3s;
             cursor: pointer;
         }
 
-        .button:hover { background-color: #2980b9; }
+        .button:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.05);
+        }
 
         .card p { font-size: 14px; margin: 10px 0; }
-        
+
+        /* ===== New blocks (Hero + content) ===== */
+        .hero {
+            text-align: left;
+            padding: 56px 16px 18px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.70), rgba(0,0,0,0.15));
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .hero-inner {
+            max-width: 1040px;
+            margin: 0 auto;
+            background: rgba(0,0,0,0.28);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 28px 22px;
+            box-shadow: 0 12px 50px rgba(0,0,0,0.45);
+            backdrop-filter: blur(6px);
+        }
+
+        .hero-title {
+            margin: 0 0 10px;
+            font-size: 38px;
+            line-height: 1.12;
+            letter-spacing: -0.02em;
+            text-shadow: 0 6px 22px rgba(0,0,0,0.75);
+        }
+
+        .hero-subtitle {
+            margin: 0 0 18px;
+            color: var(--text-muted);
+            font-size: 18px;
+            line-height: 1.5;
+            text-shadow: 0 6px 18px rgba(0,0,0,0.7);
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .button-ghost {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.14);
+        }
+
+        .lead {
+            color: var(--text-muted);
+            margin: 10px 0 0;
+            font-size: 14px;
+            text-shadow: none;
+        }
+
+        .feature-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-top: 14px;
+        }
+
+        .mini-card {
+            text-align: left;
+            background: var(--bg-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .mini-card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+        }
+
+        .mini-card p {
+            margin: 0;
+            font-size: 14px;
+            color: var(--text-muted);
+            text-shadow: none;
+        }
+
+        .list {
+            text-align: left;
+            margin: 14px auto 0;
+            max-width: 760px;
+            padding-left: 18px;
+            color: var(--text-muted);
+        }
+
+        .list li { margin: 8px 0; }
+
+        .steps {
+            text-align: left;
+            margin: 14px auto 0;
+            max-width: 760px;
+            padding-left: 18px;
+            color: var(--text-muted);
+        }
+
+        .steps li { margin: 10px 0; }
+
+        .contact-cta {
+            background: linear-gradient(135deg, rgba(52,152,219,0.18), rgba(0,0,0,0.55));
+            border-color: rgba(52,152,219,0.25);
+        }
+
+        .contact-cta h2 { margin-top: 0; }
+
+        .muted-footer {
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.06);
+            opacity: 0.85;
+        }
+
+        .muted-footer p {
+            font-size: 14px;
+            color: var(--text-muted);
+            text-shadow: none;
+            margin: 8px 0 0;
+        }
+
+        @media (max-width: 720px) {
+            .hero { padding: 44px 12px 14px; }
+            .hero-inner { padding: 22px 16px; }
+            .hero-title { font-size: 30px; }
+            .hero-subtitle { font-size: 16px; }
+            .section { padding: 18px; }
+            .feature-grid { grid-template-columns: 1fr; }
+            .card { width: 100%; max-width: 360px; }
+        }
+         
         /* ===== MODAL DARK UI ===== */
 
         .modal-box {
@@ -285,10 +438,107 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
 
 <body>
 
-<h1>Anna English AI</h1>
-<p>Подбери обучение английскому с помощью AI</p>
+<header class="hero">
+    <div class="hero-inner">
+        <h1 class="hero-title">Английский для школьников онлайн</h1>
+        <p class="hero-subtitle">Индивидуальные занятия с преподавателем Анной на современной платформе</p>
+        <div class="hero-actions">
+            <a class="button" onclick="openTestModal()">Пройти тест</a>
+            <a class="button button-ghost" href="/teacher.html">О преподавателе</a>
+        </div>
+        <p class="lead">Тест поможет быстро определить уровень и понять, с чего начать занятия.</p>
+    </div>
+</header>
 
+<div class="page">
 
+<div class="section">
+    <h2>Кому подойдут занятия</h2>
+    <ul class="list">
+        <li>проблемы со школьной программой</li>
+        <li>сложности с грамматикой</li>
+        <li>ребёнок не говорит</li>
+        <li>подготовка к контрольным и экзаменам</li>
+    </ul>
+</div>
+
+<div class="section">
+    <h2>Как начать</h2>
+    <ol class="steps">
+        <li>Пройти тест</li>
+        <li>Узнать уровень</li>
+        <li>Обсудить результат с Анной</li>
+        <li>Начать занятия</li>
+    </ol>
+</div>
+
+<div class="section">
+    <h2>Об Анне</h2>
+    <ul class="list">
+        <li>опыт 10+ лет</li>
+        <li>работа с детьми</li>
+        <li>уровень C1 (FCE)</li>
+        <li>индивидуальный подход</li>
+    </ul>
+    <a class="button button-ghost" href="/teacher.html">Подробнее</a>
+</div>
+
+<div class="section">
+    <h2>Как проходят занятия</h2>
+    <div class="feature-grid">
+        <div class="mini-card">
+            <h3>Онлайн формат</h3>
+            <p>Занятия проходят удобно из дома, без потери времени на дорогу.</p>
+        </div>
+        <div class="mini-card">
+            <h3>Платформа ProgressMe</h3>
+            <p>Современная среда для уроков, материалов и прогресса.</p>
+        </div>
+        <div class="mini-card">
+            <h3>Интерактивные задания</h3>
+            <p>Больше вовлечённости: практика, примеры, упражнения на уроке.</p>
+        </div>
+        <div class="mini-card">
+            <h3>Домашняя работа</h3>
+            <p>Закрепляем результат, чтобы знания переходили в навык.</p>
+        </div>
+        <div class="mini-card">
+            <h3>Обратная связь</h3>
+            <p>Анна объясняет, корректирует и помогает двигаться по шагам.</p>
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <h2>AI-инструменты</h2>
+    <ul class="list">
+        <li>помогают определить уровень</li>
+        <li>помогают подобрать программу</li>
+        <li>усиливают обучение, но не заменяют преподавателя</li>
+    </ul>
+
+    <div class="cards">
+
+        <div class="card">
+            <h3>🧠 Подобрать программу</h3>
+            <p>AI определит уровень и предложит персональный план обучения</p>
+            <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" target="_blank">
+                Начать
+            </a>
+        </div>
+
+        <div class="card">
+            <h3>🎮 AI-приложения</h3>
+            <p>Интересные и креативные AI-эксперименты</p>
+            <a class="button" href="/ai.html">
+                Открыть
+            </a>
+        </div>
+
+    </div>
+</div>
+
+<!--
 <div class="section">
     <h2>Об обучении</h2>
 
@@ -350,10 +600,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
 
     </div>
 </div>
+-->
 
 <!-- EMAIL -->
-<div class="section">
-    <h2>Связаться с преподавателем</h2>
+<div class="section contact-cta">
+    <h2>Напишите Анне, чтобы обсудить обучение</h2>
+    <p class="lead">Коротко опишите цель (школа, оценки, экзамены) — Анна ответит и подскажет формат.</p>
 
     <p>
         По всем вопросам вы можете написать Анне электронную почту:
@@ -366,13 +618,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
     <p style="font-size:14px; opacity:0.85;">
         Ответим, поможем подобрать обучение и подскажем оптимальный формат
     </p>
+
+    <div class="hero-actions" style="justify-content:center; margin-top:14px;">
+        <a href="https://t.me/anna_english_ai" target="_blank" class="button button-ghost">
+            Написать в Telegram
+        </a>
+    </div>
 </div>
 
-<!-- TELEGRAM -->
-<div style="margin-top:30px; opacity:0.7;">
-    <a href="https://t.me/anna_english_ai" target="_blank" style="color:#ccc; font-size:14px; text-decoration:none;">
-        Telegram канал (дополнительно)
-    </a>
+<div class="section muted-footer">
+    <h2>Другие проекты</h2>
+</div>
+
 </div>
 
 <!-- МОДАЛКА -->
