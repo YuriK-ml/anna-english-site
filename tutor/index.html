@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI English Tutor — Anna English AI</title>
+  <meta name="description" content="Практикуйте разговорный английский в реальных ситуациях: выберите уровень и тему, начните диалог. Демо-версия без подключения AI." />
+  <link rel="canonical" href="https://anna.korobkovhub.ru/tutor/" />
+  <link rel="stylesheet" href="/tutor/tutor.css" />
+</head>
+<body>
+  <header class="tutor-hero">
+    <div class="tutor-hero__inner">
+      <div class="tutor-hero__top">
+        <a class="tutor-link" href="/">← На сайт</a>
+        <span class="tutor-badge">DEMO</span>
+      </div>
+
+      <h1 class="tutor-title">AI English Tutor</h1>
+      <p class="tutor-subtitle">Практикуйте английский в реальных ситуациях. Выберите уровень и тему разговора.</p>
+    </div>
+  </header>
+
+  <main class="tutor-wrap">
+    <section id="view-home" class="tutor-section">
+      <div class="tutor-section__header">
+        <h2 class="tutor-h2">Уровень</h2>
+        <p class="tutor-muted">Выберите уровень — он сохранится на этом устройстве.</p>
+      </div>
+      <div id="levelPicker" class="tutor-levels" aria-label="Выбор уровня"></div>
+
+      <div class="tutor-divider"></div>
+
+      <div class="tutor-section__header">
+        <h2 class="tutor-h2">Темы</h2>
+        <p class="tutor-muted">Нажмите на тему, чтобы начать диалог.</p>
+      </div>
+      <div id="topicGrid" class="tutor-topics" aria-label="Список тем"></div>
+    </section>
+
+    <section id="view-chat" class="tutor-section" hidden>
+      <div class="tutor-chatbar">
+        <button id="backBtn" class="tutor-btn tutor-btn--ghost" type="button">← Назад</button>
+        <div class="tutor-chatbar__meta">
+          <div id="chatTitle" class="tutor-chatbar__title"></div>
+          <div class="tutor-chatbar__sub">
+            <span id="chatLevel" class="tutor-chip"></span>
+          </div>
+        </div>
+        <button id="restartBtn" class="tutor-btn tutor-btn--ghost" type="button">Начать сначала</button>
+      </div>
+
+      <div class="tutor-split">
+        <div class="tutor-chat">
+          <div id="chatMessages" class="tutor-messages" aria-live="polite"></div>
+
+          <div class="tutor-input">
+            <textarea id="chatInput" class="tutor-textarea" rows="2" placeholder="Напишите сообщение…"></textarea>
+            <button id="micBtn" class="tutor-iconbtn" type="button" aria-label="Голосовой ввод">🎤</button>
+            <button id="sendBtn" class="tutor-btn" type="button">Send</button>
+          </div>
+          <div class="tutor-hint">Голосовой ввод будет подключён на следующем этапе.</div>
+        </div>
+
+        <aside class="tutor-panel" aria-label="Панель разбора">
+          <div class="tutor-panel__header">
+            <div class="tutor-panel__title">
+              <span>Разбор ответа</span>
+              <span class="tutor-badge tutor-badge--small">DEMO</span>
+            </div>
+
+            <div class="tutor-controls">
+              <div class="tutor-control">
+                <span class="tutor-control__label">Язык</span>
+                <div class="tutor-toggle">
+                  <button id="langRu" class="tutor-toggle__btn" type="button">RU</button>
+                  <button id="langEn" class="tutor-toggle__btn" type="button">EN</button>
+                </div>
+              </div>
+
+              <div class="tutor-control">
+                <span class="tutor-control__label">Строгость</span>
+                <div class="tutor-toggle">
+                  <button id="strictFriendly" class="tutor-toggle__btn" type="button">Friendly</button>
+                  <button id="strictNormal" class="tutor-toggle__btn" type="button">Normal</button>
+                  <button id="strictStrict" class="tutor-toggle__btn" type="button">Strict</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="analysisContent" class="tutor-panel__content"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="tutor-toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/tutor/tutor.js"></script>
+</body>
+</html>

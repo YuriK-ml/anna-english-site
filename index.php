@@ -473,6 +473,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
 </div>
 
 <div class="section">
+    <h2>Полезные материалы</h2>
+    <p style="margin-top:10px;">Короткие статьи для родителей: как помочь ребёнку с английским и как начать без стресса.</p>
+    <a class="button button-ghost" href="/articles/">Перейти к статьям</a>
+</div>
+
+<div class="section">
     <h2>Об Анне</h2>
     <ul class="list">
         <li>опыт 10+ лет</li>
@@ -524,6 +530,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
             <p>AI определит уровень и предложит персональный план обучения</p>
             <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" target="_blank">
                 Начать
+            </a>
+        </div>
+
+        <div class="card">
+            <h3>🎙 AI-репетитор</h3>
+            <p>Практикуйте разговорный английский с AI в реальных жизненных ситуациях</p>
+            <a class="button" href="/tutor/">
+                Начать диалог
             </a>
         </div>
 
