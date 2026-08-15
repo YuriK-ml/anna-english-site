@@ -286,6 +286,17 @@ body{
   line-height: 1.5;
   color: rgba(255,255,255,0.90);
 }
+.tutor-msg--pending{
+  opacity: 0.92;
+}
+.tutor-msg--pending .tutor-msg__text{
+  font-style: italic;
+  color: rgba(255,255,255,0.82);
+}
+.tutor-msg--error{
+  border-color: rgba(255, 140, 140, 0.22);
+  background: rgba(255, 140, 140, 0.08);
+}
 
 .tutor-input{
   display: grid;
@@ -404,6 +415,83 @@ body{
 .tutor-empty{
   color: rgba(255,255,255,0.70);
   font-size: 13px;
+}
+.tutor-loading{
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+.tutor-spinner{
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.22);
+  border-top-color: rgba(52,152,219,0.9);
+  animation: tutorSpin 0.9s linear infinite;
+}
+@keyframes tutorSpin{
+  from{ transform: rotate(0deg); }
+  to{ transform: rotate(360deg); }
+}
+.tutor-error{
+  color: rgba(255, 160, 160, 0.92);
+}
+
+.tutor-ok{
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 255, 170, 0.18);
+  background: rgba(120, 255, 170, 0.07);
+  color: rgba(230,255,240,0.94);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.tutor-note{
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(52,152,219,0.18);
+  background: rgba(52,152,219,0.08);
+  margin: 10px 0 12px;
+}
+.tutor-note__title{
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+.tutor-note__body{
+  color: rgba(255,255,255,0.88);
+}
+
+.tutor-issue{
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.34);
+}
+.tutor-issue__type{
+  font-weight: 900;
+  margin-bottom: 8px;
+  color: rgba(255,255,255,0.92);
+}
+.tutor-issue__row{
+  font-weight: 800;
+  margin: 6px 0;
+}
+.tutor-issue__block{
+  margin-top: 10px;
+}
+.tutor-issue__label{
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.78);
+  margin-bottom: 4px;
+}
+.tutor-issue__text{
+  color: rgba(255,255,255,0.88);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .tutor-kv{

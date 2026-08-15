@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  var API_URL = "/api/chat.php";
+
   var LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
   var DEFAULT_LEVEL = "A2";
 
@@ -91,9 +93,6 @@
     },
   ];
 
-  var DEMO_AI_REPLY =
-    "Thank you! This is a demo reply. The AI conversation\nwill be connected at the next stage.";
-
   var LS = {
     level: "tutor_level",
     lang: "tutor_analysis_lang",
@@ -145,10 +144,31 @@
     return "tutor_history_" + topicId + "_" + level;
   }
 
+  function normalizeLocalHistoryItem(m) {
+    if (!m || typeof m !== "object") return null;
+    var role = m.role;
+    if (role === "ai") role = "assistant"; // backward compatibility
+    if (role !== "assistant" && role !== "user") return null;
+    var text = typeof m.text === "string" ? m.text : "";
+    text = text.trim();
+    if (!text) return null;
+    return {
+      role: role,
+      text: text,
+      ts: typeof m.ts === "number" ? m.ts : Date.now(),
+    };
+  }
+
   function loadHistory(topicId, level) {
     var raw = localStorage.getItem(historyKey(topicId, level));
     var data = safeJsonParse(raw, []);
-    return Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) return [];
+    var out = [];
+    for (var i = 0; i < data.length; i++) {
+      var n = normalizeLocalHistoryItem(data[i]);
+      if (n) out.push(n);
+    }
+    return out;
   }
 
   function saveHistory(topicId, level, messages) {
@@ -159,7 +179,7 @@
     if (!messages || messages.length === 0) {
       return [
         {
-          role: "ai",
+          role: "assistant",
           text: topic.starter,
           ts: Date.now(),
         },
@@ -200,14 +220,12 @@
     LEVELS.forEach(function (lvl) {
       var btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "tutor-btn tutor-btn--ghost";
-      if (lvl === selectedLevel) btn.className += " tutor-btn--active";
+      btn.className = "tutor-btn tutor-btn--ghost " + (lvl === selectedLevel ? "tutor-btn--active" : "");
       btn.textContent = lvl;
       btn.addEventListener("click", function () {
         setSelectedLevel(lvl);
         state.level = lvl;
         renderLevelPicker(lvl);
-        if (state.view === "chat") updateChatMeta();
       });
       wrap.appendChild(btn);
     });
@@ -217,26 +235,25 @@
     var grid = $("topicGrid");
     grid.innerHTML = "";
 
-    TOPICS.forEach(function (topic) {
+    TOPICS.forEach(function (t) {
       var card = document.createElement("div");
       card.className = "tutor-card";
       card.tabIndex = 0;
       card.setAttribute("role", "button");
-      card.setAttribute("aria-label", topic.title + ". " + topic.subtitle);
 
       var title = document.createElement("div");
       title.className = "tutor-card__title";
-      title.textContent = topic.emoji + " " + topic.title;
+      title.textContent = t.emoji + " " + t.title;
 
       var desc = document.createElement("p");
       desc.className = "tutor-card__desc";
-      desc.textContent = topic.subtitle;
+      desc.textContent = t.subtitle;
 
       card.appendChild(title);
       card.appendChild(desc);
 
       function open() {
-        openChat(topic.id);
+        openChat(t.id);
       }
 
       card.addEventListener("click", open);
@@ -276,11 +293,16 @@
 
     messages.forEach(function (m) {
       var item = document.createElement("div");
-      item.className = "tutor-msg " + (m.role === "user" ? "tutor-msg--user" : "tutor-msg--ai");
+      var isUser = m.role === "user";
+      item.className =
+        "tutor-msg " +
+        (isUser ? "tutor-msg--user" : "tutor-msg--ai") +
+        (m.pending ? " tutor-msg--pending" : "") +
+        (m.error ? " tutor-msg--error" : "");
 
       var role = document.createElement("div");
       role.className = "tutor-msg__role";
-      role.textContent = m.role === "user" ? "You" : "AI Tutor";
+      role.textContent = isUser ? "You" : (m.pending ? "AI…" : "AI Tutor");
 
       var text = document.createElement("div");
       text.className = "tutor-msg__text";
@@ -303,74 +325,185 @@
     });
   }
 
-  function renderAnalysis(messages) {
+  function renderAnalysisEmpty() {
     var content = $("analysisContent");
-    var lang = getAnalysisLang();
-    var strict = getStrictness();
+    content.innerHTML =
+      '<div class="tutor-empty">После вашего ответа здесь появятся исправления и рекомендации преподавателя.</div>';
+  }
 
-    if (!hasUserMessage(messages)) {
-      content.innerHTML =
-        '<div class="tutor-empty">После вашего ответа здесь появятся исправления и рекомендации преподавателя.</div>';
+  function renderAnalysisLoading() {
+    var content = $("analysisContent");
+    content.innerHTML =
+      '<div class="tutor-empty tutor-loading"><span class="tutor-spinner" aria-hidden="true"></span>AI анализирует сообщение…</div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function renderAnalysisError(message) {
+    var content = $("analysisContent");
+    content.innerHTML =
+      '<div class="tutor-empty tutor-error">' +
+      escapeHtml(message || "Не удалось получить разбор. Попробуйте ещё раз.") +
+      "</div>";
+  }
+
+  function renderAnalysis(analysis) {
+    var content = $("analysisContent");
+    if (!analysis || typeof analysis !== "object") {
+      renderAnalysisEmpty();
       return;
     }
 
-    var toneRu =
-      strict === "friendly"
-        ? "Мягко и спокойно"
-        : strict === "strict"
-        ? "Строго и по делу"
-        : "Нормально";
+    var uiLang = getAnalysisLang();
+    var t = {
+      okDefault: uiLang === "en" ? "Excellent! No mistakes found." : "Отлично! Ошибок не найдено.",
+      altTitle: uiLang === "en" ? "A more natural option" : "Вариант звучит естественнее",
+      explLabel: uiLang === "en" ? "Explanation" : "Объяснение",
+      exLabel: uiLang === "en" ? "Example" : "Пример",
+    };
 
-    var toneEn =
-      strict === "friendly"
-        ? "Friendly"
-        : strict === "strict"
-        ? "Strict"
-        : "Normal";
+    var hasErrors = !!analysis.hasErrors;
+    var positiveFeedback = typeof analysis.positiveFeedback === "string" ? analysis.positiveFeedback.trim() : "";
+    var naturalAlternative =
+      typeof analysis.naturalAlternative === "string" ? analysis.naturalAlternative.trim() : "";
+    var issues = Array.isArray(analysis.issues) ? analysis.issues : [];
 
-    var header = lang === "ru" ? "Демонстрация интерфейса (не реальный разбор)" : "Demo UI (not a real analysis)";
-    var tone = lang === "ru" ? ("Режим: " + toneRu) : ("Mode: " + toneEn);
+    var html = "";
 
-    var explRu =
-      strict === "strict"
-        ? "После agree не нужен am."
-        : "После глагола agree не используется am.";
+    if (!hasErrors) {
+      html +=
+        '<div class="tutor-ok">' +
+        "✅ " +
+        escapeHtml(positiveFeedback || t.okDefault) +
+        "</div>";
 
-    var explEn =
-      strict === "strict"
-        ? "Do not use am after agree."
-        : "We don’t use am after the verb agree.";
+      if (naturalAlternative) {
+        html +=
+          '<div class="tutor-note"><div class="tutor-note__title">' +
+          escapeHtml(t.altTitle) +
+          "</div>" +
+          '<div class="tutor-note__body">' +
+          escapeHtml(naturalAlternative) +
+          "</div></div>";
+      }
 
-    var exampleTitle = lang === "ru" ? "Пример" : "Example";
-    var explanationTitle = lang === "ru" ? "Объяснение" : "Explanation";
+      content.innerHTML = html;
+      return;
+    }
 
-    var userText = lastUserText(messages).trim();
-    var userLine =
-      userText.length > 0
-        ? (lang === "ru" ? ("Ваше сообщение: “" + userText.slice(0, 80) + (userText.length > 80 ? "…" : "") + "”") : ("Your message: “" + userText.slice(0, 80) + (userText.length > 80 ? "…" : "") + "”"))
-        : "";
+    if (positiveFeedback) {
+      html += '<div class="tutor-ok">' + "✅ " + escapeHtml(positiveFeedback) + "</div>";
+    }
 
-    content.innerHTML =
-      '<div class="tutor-empty">' +
-      header +
-      "<br/>" +
-      tone +
-      (userLine ? "<br/>" + userLine : "") +
-      "</div>" +
-      '<div class="tutor-kv">' +
-      '<div class="tutor-kv__label">Grammar</div>' +
-      '<div class="tutor-wrong">✖ I am agree.</div>' +
-      '<div class="tutor-correct">✔ I agree.</div>' +
-      "<div style=\"margin-top:10px;\">" +
-      "<b>" +
-      explanationTitle +
-      ":</b> " +
-      (lang === "ru" ? explRu : explEn) +
-      "</div>" +
-      "<div style=\"margin-top:10px;\"><b>" +
-      exampleTitle +
-      ":</b> I agree with you.</div>" +
-      "</div>";
+    if (naturalAlternative) {
+      html +=
+        '<div class="tutor-note"><div class="tutor-note__title">' +
+        escapeHtml(t.altTitle) +
+        "</div>" +
+        '<div class="tutor-note__body">' +
+        escapeHtml(naturalAlternative) +
+        "</div></div>";
+    }
+
+    if (!issues.length) {
+      html += '<div class="tutor-empty">Есть ошибки, но разбор не сформировался. Попробуйте ещё раз.</div>';
+      content.innerHTML = html;
+      return;
+    }
+
+    issues.forEach(function (it) {
+      var type = typeof it.type === "string" ? it.type.trim() : "";
+      var original = typeof it.original === "string" ? it.original.trim() : "";
+      var corrected = typeof it.corrected === "string" ? it.corrected.trim() : "";
+      var explanation = typeof it.explanation === "string" ? it.explanation.trim() : "";
+      var example = typeof it.example === "string" ? it.example.trim() : "";
+
+      if (!type || !original || !corrected || !explanation || !example) return;
+
+      html +=
+        '<div class="tutor-issue">' +
+        '<div class="tutor-issue__type">' +
+        escapeHtml(type) +
+        "</div>" +
+        '<div class="tutor-issue__row tutor-wrong">❌ ' +
+        escapeHtml(original) +
+        "</div>" +
+        '<div class="tutor-issue__row tutor-correct">✅ ' +
+        escapeHtml(corrected) +
+        "</div>" +
+        '<div class="tutor-issue__block"><div class="tutor-issue__label">' +
+        escapeHtml(t.explLabel) +
+        '</div><div class="tutor-issue__text">' +
+        escapeHtml(explanation) +
+        "</div></div>" +
+        '<div class="tutor-issue__block"><div class="tutor-issue__label">' +
+        escapeHtml(t.exLabel) +
+        '</div><div class="tutor-issue__text">' +
+        escapeHtml(example) +
+        "</div></div>" +
+        "</div>";
+    });
+
+    content.innerHTML = html || '<div class="tutor-empty">Разбор не сформировался. Попробуйте ещё раз.</div>';
+  }
+
+  function setBusy(isBusy) {
+    state.busy = !!isBusy;
+    $("sendBtn").disabled = state.busy;
+    $("chatInput").disabled = state.busy;
+    $("restartBtn").disabled = state.busy;
+    $("backBtn").disabled = state.busy;
+    if (!state.busy) $("chatInput").focus();
+  }
+
+  function toApiHistory(messages) {
+    var out = [];
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (!m) continue;
+      if (m.role !== "user" && m.role !== "assistant") continue;
+      var text = typeof m.text === "string" ? m.text.trim() : "";
+      if (!text) continue;
+      out.push({ role: m.role, content: text });
+    }
+    // Keep last N
+    if (out.length > 24) out = out.slice(out.length - 24);
+    return out;
+  }
+
+  function callTutorApi(payload) {
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var t = setTimeout(function () {
+      if (controller) controller.abort();
+    }, 22000);
+
+    return fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined,
+      credentials: "same-origin",
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return null;
+          })
+          .then(function (data) {
+            return { ok: res.ok, status: res.status, data: data };
+          });
+      })
+      .finally(function () {
+        clearTimeout(t);
+      });
   }
 
   function openChat(topicId) {
@@ -380,12 +513,13 @@
     state.topicId = topicId;
     state.level = getSelectedLevel();
 
-    var messages = ensureStarter(topic, loadHistory(topicId, state.level));
+    var messages = ensureStarter(topic, loadHistory(state.topicId, state.level));
     saveHistory(topicId, state.level, messages);
 
     updateChatMeta();
     renderMessages(messages);
-    renderAnalysis(messages);
+    renderAnalysisEmpty();
+    state.lastAnalysis = null;
     setView("chat");
 
     location.hash = "topic=" + encodeURIComponent(topicId);
@@ -396,12 +530,14 @@
   }
 
   function closeChat() {
+    if (state.busy) return;
     state.topicId = null;
     setView("home");
     location.hash = "";
   }
 
   function sendMessage() {
+    if (state.busy) return;
     if (!state.topicId) return;
     var topic = findTopic(state.topicId);
     if (!topic) return;
@@ -413,23 +549,61 @@
     var level = getSelectedLevel();
     state.level = level;
 
-    var messages = loadHistory(state.topicId, level);
-    messages = ensureStarter(topic, messages);
-    messages.push({ role: "user", text: text, ts: Date.now() });
-    saveHistory(state.topicId, level, messages);
-    renderMessages(messages);
-    input.value = "";
+    var baseMessages = ensureStarter(topic, loadHistory(state.topicId, level));
+    updateChatMeta();
 
-    setTimeout(function () {
-      var again = loadHistory(state.topicId, level);
-      again.push({ role: "ai", text: DEMO_AI_REPLY, ts: Date.now() });
-      saveHistory(state.topicId, level, again);
-      renderMessages(again);
-      renderAnalysis(again);
-    }, 420);
+    var pendingUser = { role: "user", text: text, ts: Date.now(), pending: true };
+    var pendingAi = { role: "assistant", text: "AI отвечает…", ts: Date.now(), pending: true };
+    renderMessages(baseMessages.concat([pendingUser, pendingAi]));
+    renderAnalysisLoading();
+    setBusy(true);
+
+    var payload = {
+      topic: state.topicId,
+      level: level,
+      analysisLanguage: getAnalysisLang(),
+      strictness: getStrictness(),
+      history: toApiHistory(baseMessages.concat([{ role: "user", text: text, ts: Date.now() }])),
+    };
+
+    callTutorApi(payload)
+      .then(function (res) {
+        if (!res || !res.ok || !res.data || typeof res.data !== "object") {
+          var msg =
+            res && res.data && res.data.error && typeof res.data.error.message === "string"
+              ? res.data.error.message
+              : "Не удалось получить ответ от AI. Попробуйте ещё раз.";
+          throw new Error(msg);
+        }
+
+        var reply = typeof res.data.reply === "string" ? res.data.reply.trim() : "";
+        var analysis = res.data.analysis || null;
+
+        var next = baseMessages.slice();
+        next.push({ role: "user", text: text, ts: Date.now() });
+        next.push({ role: "assistant", text: reply || "Sorry — could you say that again?", ts: Date.now() });
+        saveHistory(state.topicId, level, next);
+        renderMessages(next);
+
+        state.lastAnalysis = analysis;
+        renderAnalysis(analysis);
+
+        input.value = "";
+      })
+      .catch(function (e) {
+        var msg = e && e.message ? e.message : "Не удалось получить ответ от AI. Попробуйте ещё раз.";
+        showToast(msg);
+        renderMessages(baseMessages);
+        renderAnalysisError(msg);
+        input.value = text;
+      })
+      .finally(function () {
+        setBusy(false);
+      });
   }
 
   function restartScenario() {
+    if (state.busy) return;
     if (!state.topicId) return;
     var topic = findTopic(state.topicId);
     if (!topic) return;
@@ -441,7 +615,8 @@
     var fresh = ensureStarter(topic, []);
     saveHistory(state.topicId, level, fresh);
     renderMessages(fresh);
-    renderAnalysis(fresh);
+    renderAnalysisEmpty();
+    state.lastAnalysis = null;
     $("chatInput").value = "";
     $("chatInput").focus();
   }
@@ -476,38 +651,23 @@
     $("langRu").addEventListener("click", function () {
       setAnalysisLang("ru");
       applyControlState();
-      if (state.view === "chat" && state.topicId) {
-        renderAnalysis(loadHistory(state.topicId, getSelectedLevel()));
-      }
     });
     $("langEn").addEventListener("click", function () {
       setAnalysisLang("en");
       applyControlState();
-      if (state.view === "chat" && state.topicId) {
-        renderAnalysis(loadHistory(state.topicId, getSelectedLevel()));
-      }
     });
 
     $("strictFriendly").addEventListener("click", function () {
       setStrictness("friendly");
       applyControlState();
-      if (state.view === "chat" && state.topicId) {
-        renderAnalysis(loadHistory(state.topicId, getSelectedLevel()));
-      }
     });
     $("strictNormal").addEventListener("click", function () {
       setStrictness("normal");
       applyControlState();
-      if (state.view === "chat" && state.topicId) {
-        renderAnalysis(loadHistory(state.topicId, getSelectedLevel()));
-      }
     });
     $("strictStrict").addEventListener("click", function () {
       setStrictness("strict");
       applyControlState();
-      if (state.view === "chat" && state.topicId) {
-        renderAnalysis(loadHistory(state.topicId, getSelectedLevel()));
-      }
     });
   }
 
@@ -524,6 +684,8 @@
     view: "home",
     level: getSelectedLevel(),
     topicId: null,
+    busy: false,
+    lastAnalysis: null,
   };
 
   function init() {
@@ -532,6 +694,7 @@
     applyControlState();
     bindControls();
     bootFromHash();
+    renderAnalysisEmpty();
   }
 
   if (document.readyState === "loading") {
