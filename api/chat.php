@@ -322,36 +322,34 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
 function tutor_response_format_schema(): array {
   return [
     'type' => 'json_schema',
-    'json_schema' => [
-      'name' => 'tutor_reply',
-      'strict' => true,
-      'schema' => [
-        'type' => 'object',
-        'additionalProperties' => false,
-        'required' => ['reply', 'analysis'],
-        'properties' => [
-          'reply' => ['type' => 'string'],
-          'analysis' => [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => ['hasErrors', 'positiveFeedback', 'naturalAlternative', 'issues'],
-            'properties' => [
-              'hasErrors' => ['type' => 'boolean'],
-              'positiveFeedback' => ['type' => ['string', 'null']],
-              'naturalAlternative' => ['type' => ['string', 'null']],
-              'issues' => [
-                'type' => 'array',
-                'items' => [
-                  'type' => 'object',
-                  'additionalProperties' => false,
-                  'required' => ['type', 'original', 'corrected', 'explanation', 'example'],
-                  'properties' => [
-                    'type' => ['type' => 'string'],
-                    'original' => ['type' => 'string'],
-                    'corrected' => ['type' => 'string'],
-                    'explanation' => ['type' => 'string'],
-                    'example' => ['type' => 'string'],
-                  ],
+    'name' => 'tutor_reply',
+    'strict' => true,
+    'schema' => [
+      'type' => 'object',
+      'additionalProperties' => false,
+      'required' => ['reply', 'analysis'],
+      'properties' => [
+        'reply' => ['type' => 'string'],
+        'analysis' => [
+          'type' => 'object',
+          'additionalProperties' => false,
+          'required' => ['hasErrors', 'positiveFeedback', 'naturalAlternative', 'issues'],
+          'properties' => [
+            'hasErrors' => ['type' => 'boolean'],
+            'positiveFeedback' => ['type' => ['string', 'null']],
+            'naturalAlternative' => ['type' => ['string', 'null']],
+            'issues' => [
+              'type' => 'array',
+              'items' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['type', 'original', 'corrected', 'explanation', 'example'],
+                'properties' => [
+                  'type' => ['type' => 'string'],
+                  'original' => ['type' => 'string'],
+                  'corrected' => ['type' => 'string'],
+                  'explanation' => ['type' => 'string'],
+                  'example' => ['type' => 'string'],
                 ],
               ],
             ],
@@ -371,10 +369,6 @@ function openai_responses(string $instructions, array $inputMessages, string $mo
     'instructions' => $instructions,
     'input' => $inputMessages,
     'temperature' => 0.6,
-    // Prefer fast natural dialog over deep reasoning.
-    'reasoning' => [
-      'effort' => 'none',
-    ],
     // Structured Output (JSON Schema).
     'text' => [
       'format' => tutor_response_format_schema(),
@@ -402,11 +396,42 @@ function openai_responses(string $instructions, array $inputMessages, string $mo
   curl_close($ch);
 
   if ($raw === false || $raw === '' || $status < 200 || $status >= 300) {
+    // Server-side diagnostics only (never send to frontend).
+    $type = 'unknown';
+    $code = 'unknown';
+    $message = 'unknown';
+
+    if (is_string($raw) && $raw !== '') {
+      $maybe = json_decode($raw, true);
+      if (is_array($maybe) && isset($maybe['error']) && is_array($maybe['error'])) {
+        $e = $maybe['error'];
+        if (isset($e['type']) && is_string($e['type']) && $e['type'] !== '') $type = $e['type'];
+        if (isset($e['code']) && is_string($e['code']) && $e['code'] !== '') $code = $e['code'];
+        if (isset($e['message']) && is_string($e['message']) && $e['message'] !== '') $message = $e['message'];
+      } else {
+        $message = 'non_json_error';
+      }
+    } else {
+      $message = ($err !== '') ? 'curl_exec_failed' : 'empty_response';
+    }
+
+    $message = preg_replace('/\s+/', ' ', trim($message));
+    if (is_string($message) && strlen($message) > 600) $message = substr($message, 0, 600) . '…';
+    error_log("OpenAI error: model={$model} status={$status} type={$type} code={$code} message={$message}");
+
     // Do not leak upstream details.
     respond(502, [
       'error' => [
         'code' => 'upstream',
         'message' => 'AI временно недоступен. Попробуйте ещё раз.',
+        // TEMP DEBUG: remove after Tutor integration testing
+        'debug' => [
+          'model' => $model,
+          'status' => $status,
+          'type' => $type,
+          'openai_code' => $code,
+          'openai_message' => $message,
+        ],
       ],
     ]);
   }
