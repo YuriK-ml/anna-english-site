@@ -3,6 +3,14 @@
 
   var API_URL = "/api/chat.php";
 
+  var TRANSCRIBE_URL = "/api/transcribe.php";
+  var STT_MIME_CANDIDATES = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+  ];
+
   var LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
   var DEFAULT_LEVEL = "A2";
 
@@ -212,7 +220,314 @@
       toast.hidden = true;
     }, 2400);
   }
+  function hintEl() {
+    return document.querySelector(".tutor-hint");
+  }
 
+  function setVoiceHint(text, kind) {
+    var el = hintEl();
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove("is-error", "is-success", "is-recording", "is-busy");
+    if (kind) el.classList.add(kind);
+  }
+
+  function voiceHintReady() {
+    setVoiceHint("Можно говорить или вводить текст с клавиатуры.", null);
+  }
+
+  function supportsSpeechInput() {
+    return !!(
+      navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      window.MediaRecorder
+    );
+  }
+
+  function chooseRecorderMimeType() {
+    if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== "function") return "";
+    for (var i = 0; i < STT_MIME_CANDIDATES.length; i++) {
+      var t = STT_MIME_CANDIDATES[i];
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  function sttSetMicVisual(isRecording) {
+    var btn = $("micBtn");
+    if (!btn) return;
+    if (isRecording) btn.classList.add("is-recording");
+    else btn.classList.remove("is-recording");
+    btn.setAttribute("aria-pressed", isRecording ? "true" : "false");
+  }
+
+  function sttStopStream(stream) {
+    if (!stream || !stream.getTracks) return;
+    try {
+      stream.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
+  function sttReset() {
+    if (!state.stt) return;
+    if (state.stt.recorder) {
+      try {
+        if (state.stt.recorder.state !== "inactive") state.stt.recorder.stop();
+      } catch (e) {}
+    }
+    sttStopStream(state.stt.stream);
+    state.stt.mode = "idle";
+    state.stt.recorder = null;
+    state.stt.stream = null;
+    state.stt.chunks = [];
+    state.stt.mimeType = "";
+    state.stt.busy = false;
+    sttSetMicVisual(false);
+
+    var mic = $("micBtn");
+    if (mic) mic.disabled = false;
+  }
+
+    function sttAbort() {
+    if (!state.stt) return;
+    state.stt.aborting = true;
+
+    try {
+      if (state.stt.recorder && state.stt.recorder.state !== "inactive") state.stt.recorder.stop();
+    } catch (e) {}
+
+    sttStopStream(state.stt.stream);
+    state.stt.mode = "idle";
+    state.stt.recorder = null;
+    state.stt.stream = null;
+    state.stt.chunks = [];
+    state.stt.mimeType = "";
+    state.stt.busy = false;
+    sttSetMicVisual(false);
+
+    var mic = $("micBtn");
+    if (mic) mic.disabled = false;
+
+    voiceHintReady();
+  }
+
+  function sttAppendToInput(text) {
+    var input = $("chatInput");
+    if (!input) return;
+
+    var existing = String(input.value || "");
+    var add = String(text || "").trim();
+    if (!add) return;
+
+    if (existing.trim().length === 0) {
+      input.value = add;
+    } else {
+      input.value = existing.replace(/\s+$/g, "") + " " + add;
+    }
+
+    input.focus();
+  }
+
+  function sttTranscribe(blob, mimeType) {
+    if (!blob || !blob.size) {
+      setVoiceHint("Не удалось распознать речь. Попробуйте ещё раз.", "is-error");
+      sttReset();
+      return;
+    }
+
+    var mic = $("micBtn");
+    if (mic) mic.disabled = true;
+
+    setVoiceHint("Распознаём речь…", "is-busy");
+
+    var ext = mimeType && mimeType.indexOf("ogg") >= 0 ? "ogg" : "webm";
+    var filename = "speech." + ext;
+
+    var form = new FormData();
+    form.append("file", blob, filename);
+
+    fetch(TRANSCRIBE_URL, {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return null;
+          })
+          .then(function (data) {
+            return { ok: res.ok, status: res.status, data: data };
+          });
+      })
+      .then(function (res) {
+        if (!res || !res.ok || !res.data || typeof res.data !== "object") {
+          var msg = "Не удалось распознать речь. Попробуйте ещё раз.";
+          console.error("transcribe failed", res);
+          setVoiceHint(msg, "is-error");
+          return;
+        }
+
+        var text = typeof res.data.text === "string" ? res.data.text.trim() : "";
+        if (!text) {
+          console.error("transcribe empty text", res.data);
+          setVoiceHint("Не удалось распознать речь. Попробуйте ещё раз.", "is-error");
+          return;
+        }
+
+        sttAppendToInput(text);
+        setVoiceHint("Речь распознана. Проверьте текст и нажмите Send.", "is-success");
+      })
+      .catch(function (e) {
+        console.error("transcribe error", e);
+        setVoiceHint("Не удалось распознать речь. Попробуйте ещё раз.", "is-error");
+      })
+      .finally(function () {
+        sttReset();
+        var btn = $("micBtn");
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  function sttStartRecording() {
+    if (!supportsSpeechInput()) {
+      setVoiceHint("Голосовой ввод не поддерживается этим браузером.", "is-error");
+      return;
+    }
+
+    if (state.stt.mode !== "idle") return;
+
+    setVoiceHint("Запрашиваем доступ к микрофону…", "is-busy");
+    state.stt.busy = true;
+
+    var mic = $("micBtn");
+    if (mic) mic.disabled = true;
+
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then(function (stream) {
+        state.stt.stream = stream;
+
+        var mimeType = chooseRecorderMimeType();
+        state.stt.mimeType = mimeType;
+
+        var rec;
+        try {
+          rec = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+        } catch (e) {
+          sttStopStream(stream);
+          state.stt.stream = null;
+          setVoiceHint("Голосовой ввод не поддерживается этим браузером.", "is-error");
+          return;
+        }
+
+        state.stt.recorder = rec;
+        state.stt.chunks = [];
+        state.stt.mode = "recording";
+
+        rec.addEventListener("dataavailable", function (evt) {
+          if (evt && evt.data && evt.data.size > 0) state.stt.chunks.push(evt.data);
+        });
+
+        rec.addEventListener("stop", function () {
+          var aborting = !!state.stt.aborting;
+          state.stt.aborting = false;
+          if (aborting) {
+            sttStopStream(state.stt.stream);
+            state.stt.mode = "idle";
+            state.stt.recorder = null;
+            state.stt.stream = null;
+            state.stt.chunks = [];
+            sttSetMicVisual(false);
+            return;
+          }
+          var usedMime = rec.mimeType || state.stt.mimeType || "audio/webm";
+          var chunks = state.stt.chunks || [];
+          var blob;
+          try {
+            blob = new Blob(chunks, { type: usedMime });
+          } catch (e) {
+            blob = new Blob(chunks);
+          }
+
+          sttStopStream(state.stt.stream);
+          state.stt.stream = null;
+          state.stt.recorder = null;
+          state.stt.chunks = [];
+          state.stt.mode = "transcribing";
+          sttSetMicVisual(false);
+
+          sttTranscribe(blob, usedMime);
+        });
+
+        sttSetMicVisual(true);
+        setVoiceHint("Идёт запись… Нажмите микрофон ещё раз, чтобы остановить.", "is-recording");
+
+        try {
+          rec.start();
+        } catch (e) {
+          sttStopStream(stream);
+          state.stt.stream = null;
+          state.stt.mode = "idle";
+          sttSetMicVisual(false);
+          setVoiceHint("Не удалось начать запись. Попробуйте ещё раз.", "is-error");
+          return;
+        }
+
+        if (mic) mic.disabled = false;
+        state.stt.busy = false;
+      })
+      .catch(function (err) {
+        state.stt.busy = false;
+        if (mic) mic.disabled = false;
+
+        var name = err && err.name ? String(err.name) : "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          setVoiceHint("Нет доступа к микрофону. Разрешите доступ в настройках браузера.", "is-error");
+        } else {
+          setVoiceHint("Не удалось получить доступ к микрофону. Попробуйте ещё раз.", "is-error");
+        }
+      });
+  }
+
+  function sttStopRecording() {
+    if (state.stt.mode !== "recording") return;
+
+    var mic = $("micBtn");
+    if (mic) mic.disabled = true;
+
+    setVoiceHint("Распознаём речь…", "is-busy");
+    sttSetMicVisual(false);
+
+    try {
+      if (state.stt.recorder && state.stt.recorder.state !== "inactive") state.stt.recorder.stop();
+    } catch (e) {
+      console.error("recorder.stop failed", e);
+      sttReset();
+      setVoiceHint("Не удалось остановить запись. Попробуйте ещё раз.", "is-error");
+      if (mic) mic.disabled = false;
+    }
+  }
+
+  function handleMicClick() {
+    if (!state.topicId) return;
+    if (!state.stt) return;
+
+    if (state.stt.mode === "recording") {
+      sttStopRecording();
+      return;
+    }
+
+    if (state.stt.mode === "idle") {
+      sttStartRecording();
+      return;
+    }
+
+    // transcribing/busy -> ignore
+  }
   function renderLevelPicker(selectedLevel) {
     var wrap = $("levelPicker");
     wrap.innerHTML = "";
@@ -522,6 +837,8 @@
     state.lastAnalysis = null;
     setView("chat");
 
+    voiceHintReady();
+
     location.hash = "topic=" + encodeURIComponent(topicId);
 
     setTimeout(function () {
@@ -531,6 +848,7 @@
 
   function closeChat() {
     if (state.busy) return;
+    if (state.stt && state.stt.mode !== "idle") sttAbort();
     state.topicId = null;
     setView("home");
     location.hash = "";
@@ -604,6 +922,7 @@
 
   function restartScenario() {
     if (state.busy) return;
+    if (state.stt && state.stt.mode !== "idle") sttAbort();
     if (!state.topicId) return;
     var topic = findTopic(state.topicId);
     if (!topic) return;
@@ -619,6 +938,7 @@
     state.lastAnalysis = null;
     $("chatInput").value = "";
     $("chatInput").focus();
+    voiceHintReady();
   }
 
   function applyControlState() {
@@ -644,9 +964,7 @@
       }
     });
 
-    $("micBtn").addEventListener("click", function () {
-      showToast("Голосовой ввод будет подключён на следующем этапе.");
-    });
+    $("micBtn").addEventListener("click", handleMicClick);
 
     $("langRu").addEventListener("click", function () {
       setAnalysisLang("ru");
@@ -686,6 +1004,7 @@
     topicId: null,
     busy: false,
     lastAnalysis: null,
+    stt: { mode: "idle", recorder: null, stream: null, chunks: [], mimeType: "", busy: false, aborting: false },
   };
 
   function init() {
