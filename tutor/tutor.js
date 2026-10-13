@@ -4,6 +4,10 @@
   var API_URL = "/api/chat.php";
 
   var TRANSCRIBE_URL = "/api/transcribe.php";
+
+  var SPEECH_URL = "/api/speech.php";
+  var TTS_RATES = [0.75, 0.85, 1, 1.15];
+  var DEFAULT_TTS_RATE = 0.85;
   var STT_MIME_CANDIDATES = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -105,6 +109,7 @@
     level: "tutor_level",
     lang: "tutor_analysis_lang",
     strict: "tutor_analysis_strictness",
+    ttsRate: "tutor_tts_rate"
   };
 
   function $(id) {
@@ -146,6 +151,52 @@
 
   function setStrictness(value) {
     localStorage.setItem(LS.strict, value);
+  }
+
+
+  function getTtsRate() {
+    var raw = localStorage.getItem(LS.ttsRate);
+    var v = parseFloat(String(raw || ""));
+    for (var i = 0; i < TTS_RATES.length; i++) {
+      if (TTS_RATES[i] === v) return v;
+    }
+    return DEFAULT_TTS_RATE;
+  }
+
+  function setTtsRate(rate) {
+    var v = parseFloat(String(rate));
+    var ok = false;
+    for (var i = 0; i < TTS_RATES.length; i++) {
+      if (TTS_RATES[i] === v) ok = true;
+    }
+    if (!ok) v = DEFAULT_TTS_RATE;
+
+    localStorage.setItem(LS.ttsRate, String(v));
+    if (state && state.tts) {
+      state.tts.playbackRate = v;
+      if (state.tts.audio) {
+        try { state.tts.audio.playbackRate = v; } catch (e) {}
+      }
+    }
+    syncTtsRateButtons();
+  }
+
+  function syncTtsRateButtons() {
+    var root = document.getElementById("ttsRateWrap");
+    if (!root) return;
+    var btns = root.querySelectorAll(".tutor-toggle__btn");
+    if (!btns || !btns.length) return;
+
+    var active = (state && state.tts && typeof state.tts.playbackRate === "number")
+      ? state.tts.playbackRate
+      : getTtsRate();
+
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      var r = parseFloat(String(b.getAttribute("data-rate") || ""));
+      if (r === active) b.classList.add("is-active");
+      else b.classList.remove("is-active");
+    }
   }
 
   function historyKey(topicId, level) {
@@ -234,6 +285,202 @@
 
   function voiceHintReady() {
     setVoiceHint("Можно говорить или вводить текст с клавиатуры.", null);
+  }
+
+
+  function ensureTtsDisclosure() {
+    var hint = hintEl();
+    if (!hint || !hint.parentElement) return;
+
+    var root = document.getElementById("tutorTtsDisclosure");
+    if (!root) {
+      root = document.createElement("div");
+      root.id = "tutorTtsDisclosure";
+      root.className = "tutor-disclosure";
+
+      var text = document.createElement("span");
+      text.className = "tutor-disclosure__text";
+      text.textContent = "Голос AI-сгенерирован.";
+      root.appendChild(text);
+
+      hint.parentElement.appendChild(root);
+    }
+  }
+
+  function ensureTtsRateControl() {
+    var restart = $("restartBtn");
+    if (!restart || !restart.parentElement) return;
+
+    var bar = restart.parentElement;
+    var wrap = document.getElementById("ttsRateWrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = "ttsRateWrap";
+      wrap.className = "tutor-chatbar__tts";
+
+      var toggle = document.createElement("div");
+      toggle.className = "tutor-toggle";
+
+      var labels = {
+        0.75: "0.75×",
+        0.85: "0.85×",
+        1: "1×",
+        1.15: "1.15×",
+      };
+
+      for (var i = 0; i < TTS_RATES.length; i++) {
+        var r = TTS_RATES[i];
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tutor-toggle__btn";
+        btn.textContent = labels[r] || String(r) + "×";
+        btn.setAttribute("data-rate", String(r));
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          var v = parseFloat(String(this.getAttribute("data-rate") || ""));
+          setTtsRate(v);
+        });
+        toggle.appendChild(btn);
+      }
+
+      wrap.appendChild(toggle);
+      bar.insertBefore(wrap, restart);
+    }
+
+    syncTtsRateButtons();
+  }
+    function syncTtsButtons() {
+    var btns = document.querySelectorAll(".tutor-ttsbtn");
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      var ts = parseInt(b.getAttribute("data-ts") || "0", 10) || 0;
+      var isLoading = !!(state.tts && state.tts.busy && state.tts.busyTs === ts);
+      var isPlaying = !!(state.tts && state.tts.playingTs && state.tts.playingTs === ts);
+
+      b.classList.toggle("is-loading", isLoading);
+      b.classList.toggle("is-playing", isPlaying);
+
+      if (isLoading) {
+        b.disabled = true;
+        b.textContent = "…";
+        b.setAttribute("aria-busy", "true");
+      } else {
+        b.disabled = false;
+        b.textContent = "▶";
+        b.removeAttribute("aria-busy");
+      }
+      b.setAttribute("aria-pressed", isPlaying ? "true" : "false");
+    }
+  }
+
+  function ttsStop() {
+    if (!state.tts) return;
+
+    if (state.tts.abortCtrl && typeof state.tts.abortCtrl.abort === "function") {
+      try { state.tts.abortCtrl.abort(); } catch (e) {}
+    }
+    state.tts.abortCtrl = null;
+
+    if (state.tts.audio) {
+      try {
+        state.tts.audio.pause();
+        state.tts.audio.src = "";
+      } catch (e) {}
+    }
+    state.tts.audio = null;
+
+    if (state.tts.url) {
+      try { URL.revokeObjectURL(state.tts.url); } catch (e) {}
+    }
+    state.tts.url = "";
+
+    state.tts.playingTs = null;
+    state.tts.busy = false;
+    state.tts.busyTs = null;
+
+    syncTtsButtons();
+  }
+
+  function ttsPlay(messageTs, text) {
+    if (!text) return;
+
+    // Stop currently playing audio or any in-flight request.
+    ttsStop();
+
+    if (!state.tts) return;
+    state.tts.reqId = (state.tts.reqId || 0) + 1;
+    var reqId = state.tts.reqId;
+
+    var controller = window.AbortController ? new AbortController() : null;
+    state.tts.abortCtrl = controller;
+    state.tts.busy = true;
+    state.tts.busyTs = messageTs;
+
+    syncTtsButtons();
+
+    fetch(SPEECH_URL, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: String(text) }),
+      signal: controller ? controller.signal : undefined,
+    })
+      .then(function (res) {
+        if (!res || !res.ok) throw new Error("upstream");
+        return res.blob();
+      })
+      .then(function (blob) {
+        if (!state.tts || state.tts.reqId !== reqId) return;
+
+        state.tts.busy = false;
+        state.tts.busyTs = null;
+
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        try { audio.playbackRate = (state.tts && typeof state.tts.playbackRate === "number") ? state.tts.playbackRate : getTtsRate(); } catch (e) {}
+
+        state.tts.url = url;
+        state.tts.audio = audio;
+        state.tts.playingTs = messageTs;
+
+        audio.addEventListener("ended", function () {
+          if (!state.tts) return;
+          if (state.tts.url) {
+            try { URL.revokeObjectURL(state.tts.url); } catch (e) {}
+          }
+          state.tts.url = "";
+          state.tts.audio = null;
+          state.tts.playingTs = null;
+          syncTtsButtons();
+        });
+
+        audio.addEventListener("error", function () {
+          showToast("Не удалось воспроизвести ответ.");
+          ttsStop();
+        });
+
+        syncTtsButtons();
+        var p = audio.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(function () {
+            showToast("Не удалось воспроизвести ответ.");
+            ttsStop();
+          });
+        }
+      })
+      .catch(function (e) {
+        if (!state.tts || state.tts.reqId !== reqId) return;
+        if (e && e.name === "AbortError") return;
+        console.error("TTS error", e);
+        showToast("Не удалось воспроизвести ответ.");
+      })
+      .finally(function () {
+        if (!state.tts || state.tts.reqId !== reqId) return;
+        state.tts.busy = false;
+        state.tts.busyTs = null;
+        state.tts.abortCtrl = null;
+        syncTtsButtons();
+      });
   }
 
   function supportsSpeechInput() {
@@ -615,20 +862,47 @@
         (m.pending ? " tutor-msg--pending" : "") +
         (m.error ? " tutor-msg--error" : "");
 
+      var head = document.createElement("div");
+      head.className = "tutor-msg__head";
+
       var role = document.createElement("div");
       role.className = "tutor-msg__role";
       role.textContent = isUser ? "You" : (m.pending ? "AI…" : "AI Tutor");
+
+      head.appendChild(role);
+
+      if (!isUser && !m.pending && !m.error && m.text) {
+        var tools = document.createElement("div");
+        tools.className = "tutor-msg__tools";
+
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tutor-ttsbtn";
+        btn.textContent = "▶";
+        btn.setAttribute("title", "Прослушать ответ");
+        btn.setAttribute("aria-label", "Прослушать ответ");
+        btn.setAttribute("data-ts", String(m.ts || 0));
+
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          ttsPlay(m.ts || 0, m.text || "");
+        });
+
+        tools.appendChild(btn);
+        head.appendChild(tools);
+      }
 
       var text = document.createElement("div");
       text.className = "tutor-msg__text";
       text.textContent = m.text || "";
 
-      item.appendChild(role);
+      item.appendChild(head);
       item.appendChild(text);
       wrap.appendChild(item);
     });
 
     wrap.scrollTop = wrap.scrollHeight;
+    syncTtsButtons();
   }
 
   function setToggleActive(groupIds, activeId) {
@@ -849,6 +1123,7 @@
   function closeChat() {
     if (state.busy) return;
     if (state.stt && state.stt.mode !== "idle") sttAbort();
+    ttsStop();
     state.topicId = null;
     setView("home");
     location.hash = "";
@@ -923,6 +1198,7 @@
   function restartScenario() {
     if (state.busy) return;
     if (state.stt && state.stt.mode !== "idle") sttAbort();
+    ttsStop();
     if (!state.topicId) return;
     var topic = findTopic(state.topicId);
     if (!topic) return;
@@ -1005,6 +1281,7 @@
     busy: false,
     lastAnalysis: null,
     stt: { mode: "idle", recorder: null, stream: null, chunks: [], mimeType: "", busy: false, aborting: false },
+    tts: { reqId: 0, audio: null, url: "", playingTs: null, busy: false, busyTs: null, playbackRate: getTtsRate(), abortCtrl: null },
   };
 
   function init() {
@@ -1012,6 +1289,8 @@
     renderTopics();
     applyControlState();
     bindControls();
+    ensureTtsDisclosure();
+    ensureTtsRateControl();
     bootFromHash();
     renderAnalysisEmpty();
   }
@@ -1022,3 +1301,19 @@
     init();
   }
 })();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -200,7 +200,7 @@ body{
 
 .tutor-chatbar{
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   gap: 12px;
   align-items: center;
   margin-bottom: 14px;
@@ -223,6 +223,15 @@ body{
   margin-top: 4px;
 }
 
+
+.tutor-chatbar__tts{
+  justify-self: end;
+}
+
+.tutor-chatbar__tts .tutor-toggle__btn{
+  padding: 6px 8px;
+  font-size: 11px;
+}
 .tutor-chip{
   display: inline-flex;
   padding: 4px 10px;
@@ -281,6 +290,73 @@ body{
   margin-bottom: 6px;
 }
 
+
+.tutor-msg__head{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.tutor-msg__head .tutor-msg__role{
+  margin-bottom: 0;
+}
+
+.tutor-msg__tools{
+  display: flex;
+  gap: 6px;
+}
+
+.tutor-ttsbtn{
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+.tutor-ttsbtn:hover{ filter: brightness(1.08); }
+
+.tutor-ttsbtn:disabled{
+  opacity: 0.60;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.tutor-ttsbtn.is-playing{
+  border-color: rgba(52,152,219,0.45);
+  box-shadow: 0 0 0 3px rgba(52,152,219,0.12);
+}
+
+.tutor-disclosure{
+  padding: 0 12px 12px;
+  margin-top: -8px;
+  color: rgba(255,255,255,0.55);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tutor-disclosure__text{
+  white-space: nowrap;
+}
+
+.tutor-ttsrates .tutor-toggle__btn{
+  padding: 6px 8px;
+  font-size: 11px;
+}
 .tutor-msg__text{
   white-space: pre-wrap;
   line-height: 1.5;
@@ -563,13 +639,19 @@ body{
   .tutor-title{ font-size: 26px; }
   .tutor-split{ grid-template-columns: 1fr; }
   .tutor-messages{ height: 360px; }
-  .tutor-chatbar{
+ .tutor-chatbar{
     grid-template-columns: auto 1fr;
     grid-template-areas:
       "back meta"
+      "rate rate"
       "restart restart";
   }
   #backBtn{ grid-area: back; }
   .tutor-chatbar__meta{ grid-area: meta; }
+  .tutor-chatbar__tts{ grid-area: rate; justify-self: end; }
   #restartBtn{ grid-area: restart; width: 100%; }
 }
+
+
+
+
