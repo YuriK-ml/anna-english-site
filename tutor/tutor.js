@@ -129,6 +129,22 @@
     return document.getElementById(id);
   }
 
+function isStandaloneMode() {
+  try {
+    var params = new URLSearchParams(location.search || '');
+    return params.get('mode') === 'standalone';
+  } catch (e) {
+    return /(?:\?|&)mode=standalone(?:&|$)/.test(location.search || '');
+  }
+}
+
+function applyStandaloneMode() {
+  if (!isStandaloneMode()) return;
+  // Hide only the 'back to main site' link area in standalone mode.
+  var top = document.querySelector('.tutor-hero__top');
+  if (top) top.style.display = 'none';
+}
+
   function safeJsonParse(raw, fallback) {
     try {
       var parsed = JSON.parse(raw);
@@ -1532,6 +1548,7 @@
   };
 
   function init() {
+    applyStandaloneMode();
     renderLevelPicker(getSelectedLevel());
     renderTopics();
     applyControlState();
