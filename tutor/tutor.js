@@ -8,6 +8,9 @@
   var SPEECH_URL = "/api/speech.php";
   var TTS_RATES = [0.75, 0.85, 1, 1.15];
   var DEFAULT_TTS_RATE = 0.85;
+  var IMAGE_MAX_DIM = 1024;
+  var IMAGE_MAX_BYTES = 900 * 1024;
+  var ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
   var STT_MIME_CANDIDATES = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -103,6 +106,16 @@
       subtitle: "Общение во время путешествия",
       starter: "Hi! Where are you traveling from?",
     },
+    {
+      id: "gaming",
+      emoji: "🎮",
+      title: "Gaming",
+      subtitle: "Компьютерные игры",
+      cardTitle: "Gaming — Компьютерные игры",
+      desc: "Играй, обсуждай стратегии и изучай английский",
+      starter: "Hi! What game would you like to play or talk about today?",
+    },
+
   ];
 
   var LS = {
@@ -349,7 +362,229 @@
 
     syncTtsRateButtons();
   }
-    function syncTtsButtons() {
+  function ensureImageComposerUI() {
+    var input = $("chatInput");
+    if (!input) return;
+    var host = input.closest ? input.closest(".tutor-chat") : null;
+    if (!host) return;
+
+    var el = document.getElementById("composeImage");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "composeImage";
+      el.className = "tutor-compose";
+      el.hidden = true;
+      var hint = host.querySelector(".tutor-hint");
+      host.insertBefore(el, hint || null);
+    }
+  }
+
+  function clearComposeImage() {
+    if (!state.compose) return;
+    state.compose.imageDataUrl = null;
+    state.compose.imageMime = "";
+    state.compose.imageBusy = false;
+    renderComposeImage();
+  }
+
+  function renderComposeImage() {
+    var el = document.getElementById("composeImage");
+    if (!el) return;
+
+    var has = !!(state.compose && state.compose.imageDataUrl);
+    var busy = !!(state.compose && state.compose.imageBusy);
+
+    if (!has && !busy) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+
+    el.hidden = false;
+    el.innerHTML = "";
+
+    if (busy) {
+      var b = document.createElement("div");
+      b.className = "tutor-compose__busy";
+      b.textContent = "Обрабатываем изображение…";
+      el.appendChild(b);
+      return;
+    }
+
+    var row = document.createElement("div");
+    row.className = "tutor-compose__row";
+
+    var img = document.createElement("img");
+    img.className = "tutor-compose__thumb";
+    img.alt = "Вставленное изображение";
+    img.src = state.compose.imageDataUrl;
+
+    var actions = document.createElement("div");
+    actions.className = "tutor-compose__actions";
+
+    var meta = document.createElement("div");
+    meta.className = "tutor-compose__meta";
+    meta.textContent = "Изображение будет отправлено вместе с сообщением.";
+
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "tutor-compose__remove";
+    del.textContent = "Удалить";
+    del.addEventListener("click", function (e) {
+      e.preventDefault();
+      clearComposeImage();
+    });
+
+    actions.appendChild(meta);
+    actions.appendChild(del);
+
+    row.appendChild(img);
+    row.appendChild(actions);
+    el.appendChild(row);
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () {
+        resolve(String(r.result || ""));
+      };
+      r.onerror = function () {
+        reject(new Error("read_failed"));
+      };
+      r.readAsDataURL(file);
+    });
+  }
+
+  function loadImageFromDataUrl(url) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error("image_load_failed")); };
+      img.src = url;
+    });
+  }
+
+  function canvasToBlob(canvas, mime, quality) {
+    return new Promise(function (resolve) {
+      if (!canvas || typeof canvas.toBlob !== "function") return resolve(null);
+      try {
+        canvas.toBlob(function (blob) {
+          resolve(blob || null);
+        }, mime, quality);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  function downscaleImageFile(file) {
+    // Returns Promise<{ dataUrl, mime, bytes }>
+    return fileToDataUrl(file)
+      .then(function (dataUrl) {
+        return loadImageFromDataUrl(dataUrl).then(function (img) {
+          var w = img.naturalWidth || img.width || 0;
+          var h = img.naturalHeight || img.height || 0;
+          if (!w || !h) throw new Error("bad_image");
+
+          var maxSide = Math.max(w, h);
+          var scale = maxSide > IMAGE_MAX_DIM ? (IMAGE_MAX_DIM / maxSide) : 1;
+          var tw = Math.max(1, Math.round(w * scale));
+          var th = Math.max(1, Math.round(h * scale));
+
+          var canvas = document.createElement("canvas");
+          canvas.width = tw;
+          canvas.height = th;
+          var ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("no_canvas");
+          ctx.drawImage(img, 0, 0, tw, th);
+
+          // Prefer smaller formats. If webp unsupported, fall back to jpeg.
+          var outMime = "image/webp";
+          var qList = [0.86, 0.76, 0.66, 0.56];
+
+          function tryEncode(mimeIndex, qIndex) {
+            var mime = mimeIndex === 0 ? outMime : "image/jpeg";
+            var q = qList[qIndex] || 0.76;
+
+            return canvasToBlob(canvas, mime, q).then(function (blob) {
+              if (!blob) {
+                // fallback: toDataURL
+                var du;
+                try { du = canvas.toDataURL(mime, q); } catch (e) { du = ""; }
+                if (!du) throw new Error("encode_failed");
+                return { dataUrl: du, mime: mime, bytes: du.length };
+              }
+
+              if (blob.size > IMAGE_MAX_BYTES && qIndex < qList.length - 1) {
+                return tryEncode(mimeIndex, qIndex + 1);
+              }
+              if (blob.size > IMAGE_MAX_BYTES && mimeIndex === 0) {
+                // try jpeg if webp still too large
+                return tryEncode(1, 0);
+              }
+
+              return fileToDataUrl(blob).then(function (du2) {
+                return { dataUrl: du2, mime: mime, bytes: blob.size };
+              });
+            });
+          }
+
+          return tryEncode(0, 0);
+        });
+      });
+  }
+
+  function setComposeImageFromFile(file) {
+    if (!state.compose) return;
+    ensureImageComposerUI();
+
+    if (!file || !file.type || ALLOWED_IMAGE_MIME.indexOf(file.type) < 0) {
+      showToast("Поддерживаются PNG/JPEG/WEBP.");
+      return;
+    }
+
+    state.compose.imageBusy = true;
+    renderComposeImage();
+
+    downscaleImageFile(file)
+      .then(function (res) {
+        // Guard: keep only one image.
+        state.compose.imageDataUrl = res && res.dataUrl ? res.dataUrl : null;
+        state.compose.imageMime = res && res.mime ? res.mime : "";
+        if (!state.compose.imageDataUrl) throw new Error("no_data");
+        renderComposeImage();
+        showToast("Изображение добавлено.");
+      })
+      .catch(function (e) {
+        console.error("Image paste/resize error", e);
+        showToast("Не удалось обработать изображение.");
+        clearComposeImage();
+      })
+      .then(function () {
+        state.compose.imageBusy = false;
+        renderComposeImage();
+      });
+  }
+
+  function handlePaste(e) {
+    if (!e || !e.clipboardData || !e.clipboardData.items) return;
+    var items = e.clipboardData.items;
+    var file = null;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!it || it.kind !== "file") continue;
+      if (it.type && it.type.indexOf("image/") === 0) {
+        file = it.getAsFile ? it.getAsFile() : null;
+        break;
+      }
+    }
+    if (!file) return;
+
+    // Replace existing image (only one allowed).
+    setComposeImageFromFile(file);
+  }
+  function syncTtsButtons() {
     var btns = document.querySelectorAll(".tutor-ttsbtn");
     for (var i = 0; i < btns.length; i++) {
       var b = btns[i];
@@ -805,11 +1040,11 @@
 
       var title = document.createElement("div");
       title.className = "tutor-card__title";
-      title.textContent = t.emoji + " " + t.title;
+      title.textContent = t.emoji + " " + (t.cardTitle || t.title);
 
       var desc = document.createElement("p");
       desc.className = "tutor-card__desc";
-      desc.textContent = t.subtitle;
+      desc.textContent = t.desc || t.subtitle;
 
       card.appendChild(title);
       card.appendChild(desc);
@@ -894,7 +1129,9 @@
 
       var text = document.createElement("div");
       text.className = "tutor-msg__text";
-      text.textContent = m.text || "";
+      var displayText = m.text || "";
+      if (isUser && displayText === "[Image]") displayText = "📷 Изображение";
+      text.textContent = displayText;
 
       item.appendChild(head);
       item.appendChild(text);
@@ -1124,6 +1361,7 @@
     if (state.busy) return;
     if (state.stt && state.stt.mode !== "idle") sttAbort();
     ttsStop();
+    clearComposeImage();
     state.topicId = null;
     setView("home");
     location.hash = "";
@@ -1137,7 +1375,10 @@
 
     var input = $("chatInput");
     var text = (input.value || "").trim();
-    if (!text) return;
+    var hasImage = !!(state.compose && state.compose.imageDataUrl);
+    var sendText = text;
+    if (!sendText && hasImage) sendText = "[Image]";
+    if (!sendText) return;
 
     var level = getSelectedLevel();
     state.level = level;
@@ -1145,7 +1386,7 @@
     var baseMessages = ensureStarter(topic, loadHistory(state.topicId, level));
     updateChatMeta();
 
-    var pendingUser = { role: "user", text: text, ts: Date.now(), pending: true };
+    var pendingUser = { role: "user", text: sendText, ts: Date.now(), pending: true };
     var pendingAi = { role: "assistant", text: "AI отвечает…", ts: Date.now(), pending: true };
     renderMessages(baseMessages.concat([pendingUser, pendingAi]));
     renderAnalysisLoading();
@@ -1156,7 +1397,8 @@
       level: level,
       analysisLanguage: getAnalysisLang(),
       strictness: getStrictness(),
-      history: toApiHistory(baseMessages.concat([{ role: "user", text: text, ts: Date.now() }])),
+      history: toApiHistory(baseMessages.concat([{ role: "user", text: sendText, ts: Date.now() }])),
+      imageDataUrl: hasImage ? state.compose.imageDataUrl : null,
     };
 
     callTutorApi(payload)
@@ -1173,7 +1415,7 @@
         var analysis = res.data.analysis || null;
 
         var next = baseMessages.slice();
-        next.push({ role: "user", text: text, ts: Date.now() });
+        next.push({ role: "user", text: sendText, ts: Date.now() });
         next.push({ role: "assistant", text: reply || "Sorry — could you say that again?", ts: Date.now() });
         saveHistory(state.topicId, level, next);
         renderMessages(next);
@@ -1181,6 +1423,7 @@
         state.lastAnalysis = analysis;
         renderAnalysis(analysis);
 
+        clearComposeImage();
         input.value = "";
       })
       .catch(function (e) {
@@ -1199,6 +1442,7 @@
     if (state.busy) return;
     if (state.stt && state.stt.mode !== "idle") sttAbort();
     ttsStop();
+    clearComposeImage();
     if (!state.topicId) return;
     var topic = findTopic(state.topicId);
     if (!topic) return;
@@ -1239,6 +1483,8 @@
         sendMessage();
       }
     });
+
+    $("chatInput").addEventListener("paste", handlePaste);
 
     $("micBtn").addEventListener("click", handleMicClick);
 
@@ -1282,6 +1528,7 @@
     lastAnalysis: null,
     stt: { mode: "idle", recorder: null, stream: null, chunks: [], mimeType: "", busy: false, aborting: false },
     tts: { reqId: 0, audio: null, url: "", playingTs: null, busy: false, busyTs: null, playbackRate: getTtsRate(), abortCtrl: null },
+    compose: { imageDataUrl: null, imageMime: "", imageBusy: false },
   };
 
   function init() {
@@ -1301,6 +1548,13 @@
     init();
   }
 })();
+
+
+
+
+
+
+
 
 
 

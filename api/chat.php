@@ -146,7 +146,7 @@ function require_defined(string $name): string {
 
 function read_json_body_or_400(): array {
   $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
-  $maxBytes = 20000;
+  $maxBytes = 1500000;
   if ($contentLength > $maxBytes) {
     respond(400, [
       'error' => [
@@ -234,6 +234,89 @@ function last_user_message(array $history): string {
   return '';
 }
 
+
+function last_user_index(array $history): int {
+  for ($i = count($history) - 1; $i >= 0; $i--) {
+    if (($history[$i]['role'] ?? '') === 'user') return $i;
+  }
+  return -1;
+}
+
+function validate_image_data_url_or_empty($val): string {
+  if (!is_string($val)) return '';
+  $val = trim($val);
+  if ($val === '') return '';
+
+  // data:image/<type>;base64,...
+  if (!preg_match('~^data:(image/(png|jpeg|webp));base64,~', $val, $m)) {
+    respond(400, [
+      'error' => [
+        'code' => 'invalid_image',
+        'message' => 'Некорректный формат изображения.',
+      ],
+    ]);
+  }
+
+  // Quick size guard on string itself.
+  if (strlen($val) > 2000000) {
+    respond(400, [
+      'error' => [
+        'code' => 'image_too_large',
+        'message' => 'Слишком большое изображение.',
+      ],
+    ]);
+  }
+
+  $prefix = $m[0];
+  $mime = $m[1];
+  $b64 = substr($val, strlen($prefix));
+  if ($b64 === '') {
+    respond(400, [
+      'error' => [
+        'code' => 'invalid_image',
+        'message' => 'Пустое изображение.',
+      ],
+    ]);
+  }
+
+  $bin = base64_decode($b64, true);
+  if ($bin === false || $bin === '') {
+    respond(400, [
+      'error' => [
+        'code' => 'invalid_image',
+        'message' => 'Некорректное изображение.',
+      ],
+    ]);
+  }
+
+  $maxBytes = 900 * 1024;
+  if (strlen($bin) > $maxBytes) {
+    respond(400, [
+      'error' => [
+        'code' => 'image_too_large',
+        'message' => 'Слишком большое изображение.',
+      ],
+    ]);
+  }
+
+  // Signature checks (best-effort)
+  if ($mime === 'image/png') {
+    if (substr($bin, 0, 8) !== "\x89PNG
+\x1a\n") {
+      respond(400, ['error' => ['code' => 'invalid_image', 'message' => 'Некорректное PNG изображение.']]);
+    }
+  } elseif ($mime === 'image/jpeg') {
+    if (substr($bin, 0, 2) !== "\xFF\xD8") {
+      respond(400, ['error' => ['code' => 'invalid_image', 'message' => 'Некорректное JPEG изображение.']]);
+    }
+  } elseif ($mime === 'image/webp') {
+    if (substr($bin, 0, 4) !== 'RIFF' || substr($bin, 8, 4) !== 'WEBP') {
+      respond(400, ['error' => ['code' => 'invalid_image', 'message' => 'Некорректное WEBP изображение.']]);
+    }
+  }
+
+  return $val;
+}
 function scenario_for_topic(string $topicId): array {
   $scenarios = [
     'restaurant' => ['role' => 'a waiter/waitress', 'context' => 'a restaurant'],
@@ -248,6 +331,7 @@ function scenario_for_topic(string $topicId): array {
     'cinema' => ['role' => 'a cinema cashier or a friend', 'context' => 'a cinema'],
     'phone' => ['role' => 'a person on the phone', 'context' => 'a phone call'],
     'travel' => ['role' => 'a conversation partner', 'context' => 'travel situations'],
+    'gaming' => ['role' => 'a friendly gaming buddy', 'context' => 'a conversation about computer games'],
   ];
 
   if (!isset($scenarios[$topicId])) {
@@ -261,7 +345,57 @@ function scenario_for_topic(string $topicId): array {
   return $scenarios[$topicId];
 }
 
-function build_system_prompt(string $topicId, string $level, string $analysisLanguage, string $strictness): string {
+function history_mentions_wordle(array $history): bool {
+  $max = 18;
+  $count = 0;
+  for ($i = count($history) - 1; $i >= 0 && $count < $max; $i--) {
+    $m = $history[$i];
+    $c = (string)($m['content'] ?? '');
+    if ($c === '') continue;
+    $t = mb_strtolower($c, 'UTF-8');
+    if (strpos($t, 'wordle') !== false || strpos($t, 'вордл') !== false) return true;
+    $count++;
+  }
+  return false;
+}
+
+function image_guidance_for_topic(string $topicId): string {
+  switch ($topicId) {
+    case 'gaming':
+      return "IMAGE CONTEXT (Gaming):\n" .
+        "- If the image is a game screenshot (Wordle/chess/any other game), use it to keep a natural gaming conversation in English.\n" .
+        "- Ask the student questions and help them describe what they see or did.\n" .
+        "- If details are unclear, ask clarifying questions; do NOT invent letters/colors/scores.\n";
+    case 'hotel':
+      return "IMAGE CONTEXT (Hotel):\n" .
+        "- The image may show a hotel room, booking details, a bill, or a problem (e.g., broken AC). Use it to role-play talking to reception.\n" .
+        "- Offer short, useful phrases the student can say to the staff.\n" .
+        "- If there is text on the image and it is not readable, ask the student to type the key lines.\n";
+    case 'travel':
+      return "IMAGE CONTEXT (Travel):\n" .
+        "- The image may show a landmark, ticket, route, sign, or map. Use it to help the student ask/answer questions in English about where to go and what to do.\n" .
+        "- Encourage the student to describe the place and their plan.\n";
+    case 'restaurant':
+    case 'coffee':
+      return "IMAGE CONTEXT (Restaurant/Coffee Shop):\n" .
+        "- The image may show a menu, food/drinks, or a receipt. Use it to practice ordering and asking about ingredients, price, and preferences.\n" .
+        "- Ask what they want to order and confirm details politely.\n";
+    case 'airport':
+      return "IMAGE CONTEXT (Airport):\n" .
+        "- The image may show a boarding pass, signs, gate info, or baggage rules. Use it to role-play questions with airport staff.\n" .
+        "- If numbers/terms are unclear, ask the student to read them out or type them.\n";
+    case 'job':
+      return "IMAGE CONTEXT (Job Interview):\n" .
+        "- The image may show a CV/resume, vacancy, or notes. Use it to practice interview talk: skills, experience, strengths, and questions to the interviewer.\n" .
+        "- Do not rewrite the whole document; focus on key parts and short speaking practice.\n";
+    default:
+      return "IMAGE CONTEXT:\n" .
+        "- Treat the image as extra context inside the CURRENT selected topic. Do NOT switch the topic based on the image.\n" .
+        "- Use it to ask a question or continue the role-play naturally. If unclear, ask the student to describe it.\n";
+  }
+}
+
+function build_system_prompt(string $topicId, string $level, string $analysisLanguage, string $strictness, bool $hasImage, bool $imageOnly, bool $wordleMode): string {
   $sc = scenario_for_topic($topicId);
 
   $levelGuide = [
@@ -283,6 +417,35 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       ? 'Strictness: strict (detailed corrections including naturalness, but do not invent mistakes).'
       : 'Strictness: normal (main grammar/vocabulary/naturalness issues).');
 
+  $imageLine = $hasImage ? "An image may be attached to the last user message. Treat it as additional context inside the CURRENT selected topic (do not switch topics). If the image is unclear, ask clarifying questions and do NOT invent details. In the chat reply: start with exactly one short sentence prefixed with \"Image:\" that describes what you see (extract key words/letters/colors if it is a Wordle-like board), then continue the role-play." : "";
+
+  $imageOnlyLine = $imageOnly ? "If the last user message has no meaningful text (image-only), do NOT invent grammar mistakes. Set hasErrors=false and issues=[]." : "";
+
+  $topicImageLine = $hasImage ? image_guidance_for_topic($topicId) : '';
+
+  $gamingLine = '';
+  $wordleLine = '';
+  if ($topicId === 'gaming') {
+    $gamingLine =
+      "GAMING MODE (topic-specific):\n" .
+      "- First, ask which game the student wants to talk about.\n" .
+      "- Keep the conversation about games natural and friendly. Ask questions and help the student express ideas in English.\n" .
+      "- If the student uses Russian words mixed into English, do NOT treat that as a grammar mistake. Help with vocabulary: suggest English equivalents. When there are no real English mistakes, keep hasErrors=false and put the explanation in analysis.positiveFeedback, and a full-English rewrite in analysis.naturalAlternative.\n" .
+      "- Do NOT put game strategy/advice inside analysis.issues or analysis.naturalAlternative. Game tips belong only in the chat reply.\n" .
+      "- If you do not know a game, ask the student to explain the rules instead of inventing details.\n";
+  }
+  if ($topicId === 'gaming' && $wordleMode) {
+    $wordleLine =
+      "WORDLE MODE (only if the student chose Wordle):\n" .
+      "- You know Wordle rules: a 5-letter word, 6 attempts, with green/yellow/gray tiles.\n" .
+      "- Suggest opening the real Wordle in a separate browser tab.\n" .
+      "- Use any previous guesses/constraints mentioned in the conversation and in earlier \"Image:\" descriptions.\n" .
+      "- If an image shows a Wordle board, in the required single \"Image:\" sentence include a compact extraction of guesses and tile colors so it can be used as context in future turns.\n" .
+      "- Do not invent letters/colors if the image is unclear; ask the student clarifying questions.\n" .
+      "- Help the student think of the next guess. Do NOT reveal the final answer unless the student explicitly asks for it.\n" .
+      "- Consider repeated letters and position constraints.\n";
+  }
+
   return
     "You are an AI English tutor for a school student.\n" .
     "You are role-playing as {$sc['role']} in {$sc['context']}.\n" .
@@ -293,6 +456,9 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     "- Do not end the conversation without a reason.\n" .
     "- Adapt output to CEFR level {$level}: {$levelGuide}\n" .
     "\n" .
+    $gamingLine .
+    $wordleLine .
+    $topicImageLine .
     "ANALYSIS RULES:\n" .
     "- Analyze ONLY the LAST user message from the provided history.\n" .
     "- Do NOT analyze pronunciation.\n" .
@@ -303,6 +469,8 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     "- If there are no mistakes: hasErrors=false, issues=[], positiveFeedback may be set, naturalAlternative optional.\n" .
     "- {$analysisLangLine}\n" .
     "- {$strictLine}\n" .
+    "- {$imageLine}\n" .
+    "- {$imageOnlyLine}\n" .
     "\n" .
     "OUTPUT FORMAT:\n" .
     "Return ONLY valid JSON with this shape:\n" .
@@ -569,7 +737,7 @@ $model = require_defined('OPENAI_TEXT_MODEL');
 
 $input = read_json_body_or_400();
 
-$allowedTopics = ['restaurant','coffee','supermarket','hotel','airport','job','doctor','taxi','smalltalk','cinema','phone','travel'];
+$allowedTopics = ['restaurant','coffee','supermarket','hotel','airport','job','doctor','taxi','smalltalk','cinema','phone','travel','gaming'];
 $allowedLevels = ['A1','A2','B1','B2','C1','C2'];
 $allowedLang = ['ru','en'];
 $allowedStrict = ['friendly','normal','strict'];
@@ -585,8 +753,11 @@ $analysisLanguage = validate_enum($analysisLanguage, $allowedLang, 'analysisLang
 $strictness = validate_enum($strictness, $allowedStrict, 'strictness');
 
 $history = sanitize_history(pick($input, 'history', []));
+$imageDataUrl = validate_image_data_url_or_empty(pick($input, 'imageDataUrl', ''));
+$hasImage = $imageDataUrl !== '';
 $lastUser = last_user_message($history);
-if (trim($lastUser) === '') {
+$imageOnly = $hasImage && trim($lastUser) === '[Image]';
+if (trim($lastUser) === '' && !$hasImage) {
   respond(400, [
     'error' => [
       'code' => 'empty_message',
@@ -596,7 +767,7 @@ if (trim($lastUser) === '') {
 }
 
 $maxUserChars = 1000;
-if (mb_strlen($lastUser, 'UTF-8') > $maxUserChars) {
+if (!$imageOnly && mb_strlen($lastUser, 'UTF-8') > $maxUserChars) {
   respond(400, [
     'error' => [
       'code' => 'message_too_long',
@@ -605,13 +776,29 @@ if (mb_strlen($lastUser, 'UTF-8') > $maxUserChars) {
   ]);
 }
 
-$system = build_system_prompt($topic, $level, $analysisLanguage, $strictness);
+$wordleMode = ($topic === 'gaming') ? history_mentions_wordle($history) : false;
+$system = build_system_prompt($topic, $level, $analysisLanguage, $strictness, $hasImage, $imageOnly, $wordleMode);
 $inputMessages = [];
-foreach ($history as $m) {
+$lastUserIdx = $hasImage ? last_user_index($history) : -1;
+foreach ($history as $i => $m) {
+  $content = $m['content'];
+  if ($hasImage && $i === $lastUserIdx && ($m['role'] ?? '') === 'user') {
+    $text = trim((string)$m['content']);
+    $parts = [];
+    if (!$imageOnly && $text !== '') {
+      $parts[] = ['type' => 'input_text', 'text' => $text];
+    }
+    if ($imageOnly && $text !== '' && $text !== '[Image]') {
+      $parts[] = ['type' => 'input_text', 'text' => $text];
+    }
+    $parts[] = ['type' => 'input_image', 'image_url' => $imageDataUrl];
+    $content = $parts;
+  }
+
   $inputMessages[] = [
     'type' => 'message',
     'role' => $m['role'],
-    'content' => $m['content'],
+    'content' => $content,
   ];
 }
 
@@ -629,3 +816,15 @@ if ($obj === null) {
 
 $normalized = normalize_response($obj, $analysisLanguage);
 respond(200, $normalized);
+
+
+
+
+
+
+
+
+
+
+
+
