@@ -65,13 +65,27 @@ function tutor_session_start(): void {
  * Basic, file-based rate limit per IP.
  * - $bucket: short name to separate endpoints
  */
-function tutor_rate_limit_or_429(string $bucket, int $maxPerWindow = 20, int $windowSeconds = 60, int $minIntervalMs = 900): void {
+function tutor_rate_limit_or_429(string $bucket, int $maxPerWindow = 20, int $windowSeconds = 60, int $minIntervalMs = 900, bool $respondJson = true): void {
   $ip = tutor_client_ip();
   $key = sha1($bucket . '|' . $ip);
   $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
   $path = $dir . DIRECTORY_SEPARATOR . 'anna_rl_' . $key . '.json';
 
   $t = time();
+
+  $respond429 = function(string $msg) use ($respondJson): void {
+    if ($respondJson) {
+      tutor_json_respond(429, ['error' => ['code' => 'rate_limited', 'message' => $msg]]);
+    }
+    if (!headers_sent()) {
+      header('Content-Type: text/plain; charset=UTF-8');
+      header('Cache-Control: no-store');
+      header('X-Content-Type-Options: nosniff');
+    }
+    http_response_code(429);
+    echo $msg;
+    exit;
+  };
 
   $fp = @fopen($path, 'c+');
   if ($fp === false) return; // fail-open
@@ -94,11 +108,11 @@ function tutor_rate_limit_or_429(string $bucket, int $maxPerWindow = 20, int $wi
     $lastMs = isset($data['last_ms']) ? (int)$data['last_ms'] : 0;
     $deltaMs = tutor_now_ms() - $lastMs;
     if ($lastMs > 0 && $deltaMs < $minIntervalMs) {
-      tutor_json_respond(429, ['error' => ['code' => 'rate_limited', 'message' => 'Слишком часто. Подождите пару секунд и попробуйте снова.']]);
+      $respond429('Слишком часто. Подождите пару секунд и попробуйте снова.');
     }
 
     if (count($times) >= $maxPerWindow) {
-      tutor_json_respond(429, ['error' => ['code' => 'rate_limited', 'message' => 'Слишком много запросов. Попробуйте позже.']]);
+      $respond429('Слишком много запросов. Попробуйте позже.');
     }
 
     $times[] = $t;

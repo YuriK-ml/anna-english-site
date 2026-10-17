@@ -7,9 +7,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/../api/_guard.php';
 
 tutor_session_start();
-
-tutor_rate_limit_or_429('admin', 60, 60, 200);
-
 function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
 function csrf_token(): string {
@@ -86,6 +83,14 @@ try {
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   $action = (string)($_POST['action'] ?? '');
+
+  // Rate limit only POST actions.
+  // Keep admin_login protected from brute force, but do not block normal admin usage.
+  if ($action === 'admin_login') {
+    tutor_rate_limit_or_429('admin_login', 12, 60, 900, false);
+  } else {
+    tutor_rate_limit_or_429('admin_actions', 240, 60, 0, false);
+  }
 
   if ($action === 'admin_login') {
     csrf_check_or_403();
