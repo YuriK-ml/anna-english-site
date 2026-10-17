@@ -17,6 +17,11 @@ declare(strict_types=1);
 
 header('X-Content-Type-Options: nosniff');
 
+require_once __DIR__ . '/_guard.php';
+
+tutor_access_gate();
+tutor_rate_limit_or_429('tts', 12, 60, 1500);
+
 function respond_json(int $status, array $payload): void {
   if (!headers_sent()) {
     header('Content-Type: application/json; charset=UTF-8');
@@ -133,15 +138,6 @@ function normalize_openai_error(string $model, string $voice, int $status, $raw,
   return [
     'error' => [
       'message' => 'Speech generation failed.',
-      // TEMP DEBUG: remove after Tutor integration testing
-      'debug' => [
-        'model' => $model,
-        'voice' => $voice,
-        'status' => $status,
-        'type' => $type,
-        'openai_code' => $code,
-        'openai_message' => $message,
-      ],
     ],
   ];
 }

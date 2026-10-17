@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+// Do not leak PHP warnings/notices to the client.
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+
 /**
  * Speech-to-Text backend (Stage 3A)
  *
@@ -13,6 +17,11 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
+
+require_once __DIR__ . '/_guard.php';
+
+tutor_access_gate();
+tutor_rate_limit_or_429('stt', 12, 60, 1500);
 
 function respond(int $status, array $payload): void {
   http_response_code($status);
@@ -99,14 +108,6 @@ function normalize_openai_error(string $model, int $status, $raw, string $curlEr
   return [
     'error' => [
       'message' => 'Speech transcription failed.',
-      // TEMP DEBUG: remove after Tutor integration testing
-      'debug' => [
-        'model' => $model,
-        'status' => $status,
-        'type' => $type,
-        'openai_code' => $code,
-        'openai_message' => $message,
-      ],
     ],
   ];
 }
@@ -245,14 +246,6 @@ if (!is_array($data) || !isset($data['text']) || !is_string($data['text'])) {
   respond(502, [
     'error' => [
       'message' => 'Speech transcription failed.',
-      // TEMP DEBUG: remove after Tutor integration testing
-      'debug' => [
-        'model' => $model,
-        'status' => $status,
-        'type' => 'bad_upstream_format',
-        'openai_code' => 'bad_json',
-        'openai_message' => 'bad_upstream_format',
-      ],
     ],
   ]);
 }

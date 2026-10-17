@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+// Do not leak PHP warnings/notices to the client.
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+
 /**
  * Tutor backend: Browser -> POST /api/chat.php -> OpenAI -> JSON -> Browser
  *
@@ -11,6 +15,8 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
+
+require_once __DIR__ . '/_guard.php';
 
 function respond(int $status, array $payload): void {
   http_response_code($status);
@@ -592,14 +598,6 @@ function openai_responses(string $instructions, array $inputMessages, string $mo
       'error' => [
         'code' => 'upstream',
         'message' => 'AI временно недоступен. Попробуйте ещё раз.',
-        // TEMP DEBUG: remove after Tutor integration testing
-        'debug' => [
-          'model' => $model,
-          'status' => $status,
-          'type' => $type,
-          'openai_code' => $code,
-          'openai_message' => $message,
-        ],
       ],
     ]);
   }
@@ -729,7 +727,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
   ]);
 }
 
-rate_limit_or_429();
+tutor_access_gate();
+tutor_rate_limit_or_429('chat', 20, 60, 900);
 
 load_openai_config();
 $apiKey = require_defined('OPENAI_API_KEY');

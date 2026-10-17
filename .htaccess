@@ -1,3 +1,13 @@
 RewriteEngine On
 RewriteCond %{HTTPS} off
 RewriteRule ^(.*)$ https://anna.korobkovhub.ru/$1 [R=301,L]
+# Security: do not allow direct download of private files
+<Files "users.json">
+  Require all denied
+</Files>
+<Files "openai_config.php">
+  Require all denied
+</Files>
+<Files "config.php">
+  Require all denied
+</Files>

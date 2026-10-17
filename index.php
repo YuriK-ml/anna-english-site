@@ -1,22 +1,89 @@
 <?php
 // index.php для korobkovhub.ru / anna.korobkovhub.ru
 
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
+require_once __DIR__ . '/config.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+
+function client_ip_main(): string {
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    return $ip !== '' ? $ip : '0.0.0.0';
 }
 
-require_once __DIR__ . '/config.php';
-ini_set('display_errors', 1);
+function rl_main_or_429(string $bucket, int $maxPerWindow = 20, int $windowSeconds = 60, int $minIntervalMs = 900): void {
+    $ip = client_ip_main();
+    $key = sha1($bucket . '|' . $ip);
+    $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
+    $path = $dir . DIRECTORY_SEPARATOR . 'anna_main_rl_' . $key . '.json';
+
+    $t = time();
+    $fp = @fopen($path, 'c+');
+    if ($fp === false) return;
+
+    try {
+        @flock($fp, LOCK_EX);
+        $raw = stream_get_contents($fp);
+        $data = json_decode($raw ?: 'null', true);
+        if (!is_array($data)) $data = [];
+        if (!isset($data['times']) || !is_array($data['times'])) $data['times'] = [];
+
+        $times = [];
+        foreach ($data['times'] as $ts) {
+            $ts = (int)$ts;
+            if ($ts > 0 && ($t - $ts) <= $windowSeconds) $times[] = $ts;
+        }
+
+        $lastMs = isset($data['last_ms']) ? (int)$data['last_ms'] : 0;
+        $nowMs = (int)floor(microtime(true) * 1000);
+        if ($lastMs > 0 && ($nowMs - $lastMs) < $minIntervalMs) {
+            http_response_code(429);
+            echo 'rate_limited';
+            exit;
+        }
+
+        if (count($times) >= $maxPerWindow) {
+            http_response_code(429);
+            echo 'rate_limited';
+            exit;
+        }
+
+        $times[] = $t;
+        $data['times'] = $times;
+        $data['last_ms'] = $nowMs;
+
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($data));
+    } finally {
+        @flock($fp, LOCK_UN);
+        fclose($fp);
+    }
+}
+
+function users_db_path(): string {
+    // 1) Optional env override
+    $env = (string)getenv('ANNA_USERS_DB');
+    if ($env !== '') return $env;
+
+    // 2) Production layout: /public_html/index.php with sibling /private/users.json
+    $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
+    if ($docRoot !== '') {
+        $candidate = $docRoot . '/../private/users.json';
+        $realDir = realpath(dirname($candidate));
+        if ($realDir) return $realDir . DIRECTORY_SEPARATOR . 'users.json';
+        return $candidate;
+    }
+
+    // 3) Local fallback
+    return __DIR__ . '/users.json';
+}
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
 // 1. get_user
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
+	rl_main_or_429('get_user', 12, 60, 1200);
 
     $name = '';
     $contact = '';
@@ -29,7 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
         $contact = trim($_POST['contact']);
     }
 
-    $file = __DIR__ . '/users.json';
+    // Basic input limits to reduce abuse and avoid huge files.
+    $MAX_INPUT_LEN = 160;
+    if (strlen($name) > $MAX_INPUT_LEN) $name = substr($name, 0, $MAX_INPUT_LEN);
+    if (strlen($contact) > $MAX_INPUT_LEN) $contact = substr($contact, 0, $MAX_INPUT_LEN);
+
+    $file = users_db_path();
+
+    $dir = dirname($file);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0700, true);
+    }
 
     if (!file_exists($file)) {
         file_put_contents($file, '[]');
@@ -95,25 +172,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
 
     file_put_contents($file, json_encode($users, JSON_PRETTY_PRINT), LOCK_EX);
 
+    // Telegram notification (server-side, fixed template)
+    try {
+        $token = $TELEGRAM_TOKEN;
+        $chat_ids = [1387433465, 8527953030];
+        $safeName = ($name !== '') ? $name : 'не указано';
+        $safeContact = ($contact !== '') ? $contact : 'не указан';
+        $msg = "English Test STARTED\n" .
+               "Имя: {$safeName}\n" .
+               "Контакт: {$safeContact}\n" .
+               "Логин: {$test_user}";
+        foreach ($chat_ids as $chat_id) {
+            @file_get_contents("https://api.telegram.org/bot$token/sendMessage?" . http_build_query([
+                'chat_id' => $chat_id,
+                'text' => $msg
+            ]));
+        }
+    } catch (Throwable $e) {
+        error_log('Telegram notify failed: ' . $e->getMessage());
+    }
+
     echo $test_user;
     exit;
 }
 
 // --- Telegram ---
+// Deprecated: message sending is done server-side in get_user handler.
+// Keep this endpoint for backward compatibility, but do not forward arbitrary messages.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
-
-    $token = $TELEGRAM_TOKEN;
-    $chat_ids = [1387433465, 8527953030];
-
-    $message = $_POST['message'];
-
-    foreach ($chat_ids as $chat_id) {
-        file_get_contents("https://api.telegram.org/bot$token/sendMessage?" . http_build_query([
-            "chat_id" => $chat_id,
-            "text" => $message
-        ]));
-    }
-
+    rl_main_or_429('telegram_compat', 6, 60, 1500);
     echo "ok";
     exit;
 }
