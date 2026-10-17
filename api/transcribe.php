@@ -250,6 +250,15 @@ if (!is_array($data) || !isset($data['text']) || !is_string($data['text'])) {
   ]);
 }
 
+// Best-effort stats logging (must not block Tutor).
+try {
+  $studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+  if ($studentId > 0) {
+    $pdo = tutor_pdo();
+    tutor_usage_log_success($pdo, $studentId, 'stt');
+  }
+} catch (Throwable $e) {}
+
 respond(200, [
   'text' => trim($data['text']),
 ]);

@@ -238,6 +238,15 @@ if ($trimmedStart !== '' && ($trimmedStart[0] === '{' || $trimmedStart[0] === '[
   }
 }
 
+// Best-effort stats logging (must not block Tutor).
+try {
+  $studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+  if ($studentId > 0) {
+    $pdo = tutor_pdo();
+    tutor_usage_log_success($pdo, $studentId, 'tts');
+  }
+} catch (Throwable $e) {}
+
 // Return MP3 bytes (do not wrap in JSON).
 while (ob_get_level() > 0) {
   @ob_end_clean();

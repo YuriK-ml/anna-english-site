@@ -280,3 +280,42 @@ function tutor_access_gate(): void {
   // Keep a copy of the name for UI/debug (not security-critical).
   $_SESSION['tutor_student_name'] = (string)$row['name'];
 }
+
+
+/**
+ * Best-effort activity logging for admin statistics.
+ *
+ * IMPORTANT:
+ * - Logs only non-sensitive metadata.
+ * - Never blocks Tutor if it fails.
+ */
+function tutor_usage_log_success(PDO $pdo, int $studentId, string $endpoint, array $meta = []): void {
+  if ($studentId <= 0) return;
+
+  static $allowed = [
+    'login' => true,
+    'chat' => true,
+    'stt' => true,
+    'tts' => true,
+  ];
+  if (!isset($allowed[$endpoint])) return;
+
+  $createdAt = gmdate('c');
+
+  $metaJson = null;
+  if (!empty($meta)) {
+    $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($metaJson)) $metaJson = null;
+    if (is_string($metaJson) && strlen($metaJson) > 2000) {
+      $metaJson = substr($metaJson, 0, 2000);
+    }
+  }
+
+  try {
+    $st = $pdo->prepare('INSERT INTO usage_events(student_id, endpoint, created_at, meta_json) VALUES(?,?,?,?)');
+    $st->execute([$studentId, $endpoint, $createdAt, $metaJson]);
+  } catch (Throwable $e) {
+    // Fail-open: do not break paid endpoints because of stats.
+    error_log('Tutor usage_events insert failed: ' . $e->getMessage());
+  }
+}

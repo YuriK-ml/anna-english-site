@@ -814,6 +814,16 @@ if ($obj === null) {
 }
 
 $normalized = normalize_response($obj, $analysisLanguage);
+
+// Best-effort stats logging (must not block Tutor).
+try {
+  $studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+  if ($studentId > 0) {
+    $pdo = tutor_pdo();
+    tutor_usage_log_success($pdo, $studentId, 'chat');
+  }
+} catch (Throwable $e) {}
+
 respond(200, $normalized);
 
 

@@ -71,6 +71,11 @@ try {
 $_SESSION['tutor_student_id'] = (int)$row['id'];
 $_SESSION['tutor_student_name'] = (string)$row['name'];
 
+// Best-effort stats logging (must not block auth).
+try {
+  tutor_usage_log_success($pdo, (int)$row['id'], 'login');
+} catch (Throwable $e) {}
+
 respond(200, [
   'ok' => true,
   'student' => [

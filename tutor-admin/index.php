@@ -172,13 +172,88 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
   }
 }
 
-// Load list
+// Load list + activity stats
 $students = [];
+$summaryToday = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
+$summaryMonth = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
+
+function msk_dt(string $utcIso): string {
+  $utcIso = trim($utcIso);
+  if ($utcIso === '') return '';
+  try {
+    $dt = new DateTimeImmutable($utcIso);
+    $dt = $dt->setTimezone(new DateTimeZone('Europe/Moscow'));
+    return $dt->format('Y-m-d H:i');
+  } catch (Throwable $e) {
+    return $utcIso;
+  }
+}
+
+function load_usage_summary(PDO $pdo, string $startUtc, string $endUtc): array {
+  $out = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
+  try {
+    $st = $pdo->prepare('SELECT endpoint, COUNT(*) AS c FROM usage_events WHERE created_at >= ? AND created_at < ? GROUP BY endpoint');
+    $st->execute([$startUtc, $endUtc]);
+    $rows = $st->fetchAll();
+    if (is_array($rows)) {
+      foreach ($rows as $r) {
+        $ep = is_array($r) ? (string)($r['endpoint'] ?? '') : '';
+        if ($ep !== '' && array_key_exists($ep, $out)) {
+          $out[$ep] = (int)($r['c'] ?? 0);
+        }
+      }
+    }
+  } catch (Throwable $e) {
+    error_log('Admin usage summary failed: ' . $e->getMessage());
+  }
+  return $out;
+}
+
 try {
-  $st = $pdo->query('SELECT id, name, active, archived, created_at, updated_at FROM students ORDER BY id DESC');
+  // Students + per-student totals
+  $sql =
+    'SELECT s.id, s.name, s.active, s.archived, s.created_at, s.updated_at,' .
+    ' COALESCE(u.login_count,0) AS login_count,' .
+    ' COALESCE(u.chat_count,0) AS chat_count,' .
+    ' COALESCE(u.stt_count,0) AS stt_count,' .
+    ' COALESCE(u.tts_count,0) AS tts_count,' .
+    ' u.last_utc AS last_utc' .
+    ' FROM students s' .
+    ' LEFT JOIN (' .
+    "   SELECT student_id,\n" .
+    "     SUM(CASE WHEN endpoint='login' THEN 1 ELSE 0 END) AS login_count,\n" .
+    "     SUM(CASE WHEN endpoint='chat' THEN 1 ELSE 0 END) AS chat_count,\n" .
+    "     SUM(CASE WHEN endpoint='stt' THEN 1 ELSE 0 END) AS stt_count,\n" .
+    "     SUM(CASE WHEN endpoint='tts' THEN 1 ELSE 0 END) AS tts_count,\n" .
+    "     MAX(created_at) AS last_utc\n" .
+    "   FROM usage_events\n" .
+    "   GROUP BY student_id\n" .
+    " ) u ON u.student_id = s.id" .
+    ' ORDER BY s.id DESC';
+
+  $st = $pdo->query($sql);
   $students = $st ? $st->fetchAll() : [];
 } catch (Throwable $e) {
   error_log('Admin list failed: ' . $e->getMessage());
+}
+
+// Summary: store UTC in DB, but count by Moscow day/month boundaries.
+try {
+  $tzMsk = new DateTimeZone('Europe/Moscow');
+  $tzUtc = new DateTimeZone('UTC');
+
+  $todayStartUtc = (new DateTimeImmutable('today', $tzMsk))->setTimezone($tzUtc)->format('c');
+  $todayEndUtc = (new DateTimeImmutable('tomorrow', $tzMsk))->setTimezone($tzUtc)->format('c');
+
+  $monthStartMsk = new DateTimeImmutable('first day of this month 00:00:00', $tzMsk);
+  $monthEndMsk = $monthStartMsk->modify('+1 month');
+  $monthStartUtc = $monthStartMsk->setTimezone($tzUtc)->format('c');
+  $monthEndUtc = $monthEndMsk->setTimezone($tzUtc)->format('c');
+
+  $summaryToday = load_usage_summary($pdo, $todayStartUtc, $todayEndUtc);
+  $summaryMonth = load_usage_summary($pdo, $monthStartUtc, $monthEndUtc);
+} catch (Throwable $e) {
+  error_log('Admin summary window failed: ' . $e->getMessage());
 }
 
 ?><!DOCTYPE html>
@@ -223,7 +298,17 @@ try {
     .badge{ display:inline-block; padding:2px 8px; border-radius: 999px; border:1px solid var(--border); font-size: 12px; color: rgba(255,255,255,0.85); }
     .badge.off{ opacity:0.65; }
     .codebox{ margin-top:10px; padding:12px; border-radius: 12px; border:1px dashed rgba(255,255,255,0.18); background: rgba(0,0,0,0.25); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    @media (max-width: 720px){ th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display:none; } }
+    .stats-wrap{ display:flex; gap:12px; flex-wrap:wrap; }
+    .stats-block{ flex:1; min-width: 260px; background: var(--card2); border:1px solid var(--border); border-radius: 12px; padding: 12px; }
+    .stats-title{ font-weight: 700; margin: 0 0 8px; }
+    .kpi-grid{ display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; }
+    .kpi{ border:1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18); border-radius: 12px; padding: 10px; }
+    .kpi .v{ font-size: 18px; font-weight: 800; line-height: 1.1; }
+    .kpi .l{ font-size: 12px; color: var(--muted); margin-top: 4px; }
+    @media (max-width: 720px){
+      th:nth-child(1), td:nth-child(1) { display:none; }
+      .kpi-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
   </style>
 </head>
 <body>
@@ -279,14 +364,39 @@ try {
       </div>
 
       <div class="card">
+        <h2>Статистика активности</h2>
+        <div class="muted" style="margin:0 0 10px;">События сохраняются в UTC, статистика «сегодня/месяц» считается по московскому времени.</div>
+        <div class="stats-wrap">
+          <div class="stats-block">
+            <div class="stats-title">Сегодня</div>
+            <div class="kpi-grid">
+              <div class="kpi"><div class="v"><?php echo (int)$summaryToday['login']; ?></div><div class="l">Входы</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryToday['chat']; ?></div><div class="l">Chat</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryToday['stt']; ?></div><div class="l">STT</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryToday['tts']; ?></div><div class="l">TTS</div></div>
+            </div>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-title">Текущий месяц</div>
+            <div class="kpi-grid">
+              <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['login']; ?></div><div class="l">Входы</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['chat']; ?></div><div class="l">Chat</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['stt']; ?></div><div class="l">STT</div></div>
+              <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['tts']; ?></div><div class="l">TTS</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <table>
           <thead>
             <tr>
               <th>ID</th>
               <th>Имя</th>
-              <th>Создан</th>
-              <th>Обновлён</th>
               <th>Статус</th>
+              <th>Статистика</th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -300,8 +410,6 @@ try {
             <tr>
               <td><?php echo $id; ?></td>
               <td><?php echo h($name); ?></td>
-              <td class="muted"><?php echo h((string)($st['created_at'] ?? '')); ?></td>
-              <td class="muted"><?php echo h((string)($st['updated_at'] ?? '')); ?></td>
               <td>
                 <?php if ($archived): ?>
                   <span class="badge off">Archived</span>
@@ -310,6 +418,19 @@ try {
                 <?php else: ?>
                   <span class="badge off">Disabled</span>
                 <?php endif; ?>
+              </td>
+              <td class="muted">
+                <?php
+                  $loginCount = (int)($st['login_count'] ?? 0);
+                  $chatCount = (int)($st['chat_count'] ?? 0);
+                  $sttCount = (int)($st['stt_count'] ?? 0);
+                  $ttsCount = (int)($st['tts_count'] ?? 0);
+                  $lastUtc = (string)($st['last_utc'] ?? '');
+                  $lastMsk = $lastUtc !== '' ? msk_dt($lastUtc) : '';
+                ?>
+                <div>Входы: <b><?php echo $loginCount; ?></b></div>
+                <div>Последняя активность: <b><?php echo $lastMsk !== '' ? h($lastMsk) : '—'; ?></b></div>
+                <div>Chat: <b><?php echo $chatCount; ?></b> · STT: <b><?php echo $sttCount; ?></b> · TTS: <b><?php echo $ttsCount; ?></b></div>
               </td>
               <td>
                 <div class="row">
