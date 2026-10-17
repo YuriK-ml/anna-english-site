@@ -51,6 +51,22 @@ $flash = '';
 $flashType = 'info';
 $oneTimeCode = '';
 
+// One-time flash message (PRG)
+if (isset($_SESSION['tutor_admin_flash']) && is_string($_SESSION['tutor_admin_flash'])) {
+  $flash = (string)$_SESSION['tutor_admin_flash'];
+}
+unset($_SESSION['tutor_admin_flash']);
+
+if (isset($_SESSION['tutor_admin_flash_type']) && is_string($_SESSION['tutor_admin_flash_type'])) {
+  $flashType = (string)$_SESSION['tutor_admin_flash_type'];
+}
+unset($_SESSION['tutor_admin_flash_type']);
+
+if (isset($_SESSION['tutor_admin_one_time_code']) && is_string($_SESSION['tutor_admin_one_time_code'])) {
+  $oneTimeCode = (string)$_SESSION['tutor_admin_one_time_code'];
+}
+unset($_SESSION['tutor_admin_one_time_code']);
+
 // Load admin password hash from private config
 // Expected in private/tutor_auth_config.php:
 // define('TUTOR_ADMIN_PASSWORD_HASH', '...');
@@ -170,8 +186,43 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
       $flashType = 'error';
     }
   }
-}
 
+  elseif ($action === 'purge_archive') {
+    csrf_check_or_403();
+    require_admin();
+
+    try {
+      $deleted = $pdo->exec(
+        "DELETE FROM students " .
+        "WHERE archived = 1 " .
+        "AND NOT EXISTS (SELECT 1 FROM usage_events ue WHERE ue.student_id = students.id)"
+      );
+      if ($deleted === false) {
+        throw new RuntimeException('SQLite delete failed');
+      }
+      $flash = 'Удалено архивных учеников без активности: ' . (int)$deleted;
+      $flashType = 'ok';
+    } catch (Throwable $e) {
+      error_log('Admin purge_archive failed: ' . $e->getMessage());
+      $flash = 'Не удалось очистить архив.';
+      $flashType = 'error';
+    }
+  }
+
+  // POST -> Redirect -> GET (PRG) to prevent duplicate actions on refresh.
+  $_SESSION['tutor_admin_flash'] = $flash;
+  $_SESSION['tutor_admin_flash_type'] = $flashType;
+  if ($oneTimeCode !== '') {
+    $_SESSION['tutor_admin_one_time_code'] = $oneTimeCode;
+  }
+
+  $target = (string)($_SERVER['REQUEST_URI'] ?? '/tutor-admin/');
+  $target = strtok($target, '?');
+  if (!is_string($target) || $target === '') $target = '/tutor-admin/';
+  header('Location: ' . $target, true, 303);
+  exit;
+
+}
 // Load list + activity stats
 $students = [];
 $summaryToday = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
@@ -345,11 +396,19 @@ try {
             <h2>Ученики</h2>
             <div class="muted">Коды хранятся только в виде защищённых хешей. Показ кода — один раз при создании/перевыпуске.</div>
           </div>
-          <form method="post">
-            <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
-            <input type="hidden" name="action" value="admin_logout" />
-            <button class="ghost" type="submit">Выйти</button>
-          </form>
+          <div class="row" style="justify-content:flex-end;">
+            <form method="post" style="margin:0;" onsubmit="return confirm('Удалить всех архивных учеников без активности?');">
+              <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+              <input type="hidden" name="action" value="purge_archive" />
+              <button class="ghost" type="submit">Очистить архив</button>
+            </form>
+
+            <form method="post" style="margin:0;">
+              <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+              <input type="hidden" name="action" value="admin_logout" />
+              <button class="ghost" type="submit">Выйти</button>
+            </form>
+          </div>
         </div>
       </div>
 
