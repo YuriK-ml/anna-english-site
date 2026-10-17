@@ -6,6 +6,8 @@
   var TRANSCRIBE_URL = "/api/transcribe.php";
 
   var SPEECH_URL = "/api/speech.php";
+
+  var AUTH_URL = "/tutor/auth.php";
   var TTS_RATES = [0.75, 0.85, 1, 1.15];
   var DEFAULT_TTS_RATE = 0.85;
   var IMAGE_MAX_DIM = 1024;
@@ -140,9 +142,11 @@ function isStandaloneMode() {
 
 function applyStandaloneMode() {
   if (!isStandaloneMode()) return;
-  // Hide only the 'back to main site' link area in standalone mode.
+  // Hide only the 'back to main site' link in standalone mode (keep other controls like logout).
+  var back = document.getElementById('backToSiteLink');
+  if (back) back.style.display = 'none';
   var top = document.querySelector('.tutor-hero__top');
-  if (top) top.style.display = 'none';
+  if (top) top.style.justifyContent = 'flex-end';
 }
 
   function safeJsonParse(raw, fallback) {
@@ -299,6 +303,166 @@ function applyStandaloneMode() {
     showToast._t = setTimeout(function () {
       toast.hidden = true;
     }, 2400);
+  }
+
+
+  function ensureAuthUi() {
+    if (document.getElementById("authOverlay")) return;
+
+    var overlay = document.createElement("div");
+    overlay.id = "authOverlay";
+    overlay.className = "tutor-auth";
+    overlay.hidden = true;
+
+    overlay.innerHTML =
+      '<div class="tutor-auth__backdrop"></div>' +
+      '<div class="tutor-auth__card" role="dialog" aria-modal="true" aria-label="Доступ к Tutor">' +
+      '<div class="tutor-auth__title">Введите код доступа</div>' +
+      '<div class="tutor-auth__text">Чтобы пользоваться AI-функциями, нужен персональный код.</div>' +
+      '<input id="authCode" class="tutor-auth__input" inputmode="text" autocomplete="one-time-code" placeholder="Код" />' +
+      '<div class="tutor-auth__row">' +
+      '<button id="authSubmit" class="tutor-btn" type="button">Открыть доступ</button>' +
+      '<button id="authCancel" class="tutor-btn tutor-btn--ghost" type="button">Отмена</button>' +
+      '</div>' +
+      '<div id="authError" class="tutor-auth__error" hidden></div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    function close() {
+      overlay.hidden = true;
+      var err = document.getElementById("authError");
+      if (err) {
+        err.hidden = true;
+        err.textContent = "";
+      }
+    }
+
+    overlay.querySelector('.tutor-auth__backdrop').addEventListener('click', function (e) {
+      var t = parseInt(overlay.getAttribute("data-opened-at") || "0", 10) || 0;
+      if (t && Date.now() - t < 350) return;
+      close();
+    });
+
+    document.getElementById('authCancel').addEventListener('click', function () {
+      close();
+    });
+
+    document.getElementById('authSubmit').addEventListener('click', function () {
+      submitAuthCode();
+    });
+
+    document.getElementById('authCode').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitAuthCode();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
+  }
+
+  function openAuthModal(message) {
+    ensureAuthUi();
+    var overlay = document.getElementById("authOverlay");
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.setAttribute("data-opened-at", String(Date.now()));
+
+    var err = document.getElementById("authError");
+    if (err) {
+      if (message) {
+        err.textContent = message;
+        err.hidden = false;
+      } else {
+        err.textContent = "";
+        err.hidden = true;
+      }
+    }
+
+    var input = document.getElementById("authCode");
+    if (input) {
+      input.value = "";
+      setTimeout(function () {
+        try {
+          input.focus();
+        } catch (e) {}
+      }, 20);
+    }
+  }
+
+  function submitAuthCode() {
+    var btn = document.getElementById('authSubmit');
+    var input = document.getElementById('authCode');
+    var err = document.getElementById('authError');
+    if (!input) return;
+
+    var code = (input.value || '').trim();
+    if (!code) {
+      if (err) {
+        err.textContent = 'Введите код доступа.';
+        err.hidden = false;
+      }
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+
+    fetch(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ code: code }),
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return null;
+          })
+          .then(function (data) {
+            return { ok: res.ok, status: res.status, data: data };
+          });
+      })
+      .then(function (res) {
+        if (!res || !res.ok) {
+          var msg =
+            res && res.data && res.data.error && typeof res.data.error.message === 'string'
+              ? res.data.error.message
+              : 'Не удалось проверить код.';
+          if (err) {
+            err.textContent = msg;
+            err.hidden = false;
+          }
+          return;
+        }
+
+        var overlay = document.getElementById('authOverlay');
+        if (overlay) overlay.hidden = true;
+        showToast('Доступ открыт. Можно продолжать.');
+      })
+      .catch(function (e) {
+        console.error('auth error', e);
+        if (err) {
+          err.textContent = 'Не удалось проверить код.';
+          err.hidden = false;
+        }
+      })
+      .finally(function () {
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  function isAuthRequiredResponse(res) {
+    return !!(
+      res &&
+      res.status === 401 &&
+      res.data &&
+      res.data.error &&
+      res.data.error.code === 'auth_required'
+    );
   }
   function hintEl() {
     return document.querySelector(".tutor-hint");
@@ -677,8 +841,23 @@ function applyStandaloneMode() {
       signal: controller ? controller.signal : undefined,
     })
       .then(function (res) {
-        if (!res || !res.ok) throw new Error("upstream");
-        return res.blob();
+        if (!res) throw new Error("upstream");
+        if (res.ok) return res.blob();
+        if (res.status === 401) {
+          return res
+            .json()
+            .catch(function () {
+              return null;
+            })
+            .then(function (data) {
+              var shaped = { ok: false, status: res.status, data: data };
+              if (isAuthRequiredResponse(shaped)) {
+                openAuthModal(data && data.error ? data.error.message : null);
+              }
+              throw new Error("auth_required");
+            });
+        }
+        throw new Error("upstream");
       })
       .then(function (blob) {
         if (!state.tts || state.tts.reqId !== reqId) return;
@@ -722,6 +901,7 @@ function applyStandaloneMode() {
       .catch(function (e) {
         if (!state.tts || state.tts.reqId !== reqId) return;
         if (e && e.name === "AbortError") return;
+        if (e && e.message === "auth_required") return;
         console.error("TTS error", e);
         showToast("Не удалось воспроизвести ответ.");
       })
@@ -862,6 +1042,17 @@ function applyStandaloneMode() {
           });
       })
       .then(function (res) {
+        if (isAuthRequiredResponse(res)) {
+          openAuthModal(res.data && res.data.error ? res.data.error.message : null);
+          throw new Error(res.data && res.data.error && res.data.error.message ? res.data.error.message : 'Требуется код доступа.');
+        }
+
+        if (isAuthRequiredResponse(res)) {
+          openAuthModal(res.data && res.data.error ? res.data.error.message : null);
+          setVoiceHint('Введите код доступа, чтобы пользоваться голосовым вводом.', 'is-error');
+          return;
+        }
+
         if (!res || !res.ok || !res.data || typeof res.data !== "object") {
           var msg = "Не удалось распознать речь. Попробуйте ещё раз.";
           console.error("transcribe failed", res);
@@ -1419,6 +1610,13 @@ function applyStandaloneMode() {
 
     callTutorApi(payload)
       .then(function (res) {
+        if (isAuthRequiredResponse(res)) {
+          setTimeout(function () {
+            openAuthModal(res.data && res.data.error ? res.data.error.message : null);
+          }, 0);
+          throw new Error("auth_required");
+        }
+
         if (!res || !res.ok || !res.data || typeof res.data !== "object") {
           var msg =
             res && res.data && res.data.error && typeof res.data.error.message === "string"
@@ -1443,6 +1641,12 @@ function applyStandaloneMode() {
         input.value = "";
       })
       .catch(function (e) {
+        if (e && e.message === "auth_required") {
+          renderMessages(baseMessages);
+          renderAnalysisEmpty();
+          input.value = text;
+          return;
+        }
         var msg = e && e.message ? e.message : "Не удалось получить ответ от AI. Попробуйте ещё раз.";
         showToast(msg);
         renderMessages(baseMessages);

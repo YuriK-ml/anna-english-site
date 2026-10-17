@@ -11,3 +11,7 @@ RewriteRule ^(.*)$ https://anna.korobkovhub.ru/$1 [R=301,L]
 <Files "config.php">
   Require all denied
 </Files>
+
+<Files "tutor_auth_config.php">
+  Require all denied
+</Files>
