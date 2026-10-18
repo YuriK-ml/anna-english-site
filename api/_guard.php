@@ -333,3 +333,37 @@ function tutor_usage_log_success(PDO $pdo, int $studentId, string $endpoint, arr
     error_log('Tutor usage_events insert failed: ' . $e->getMessage());
   }
 }
+
+
+/**
+ * Best-effort demo activity logging (student_id = NULL).
+ *
+ * IMPORTANT:
+ * - Never logs uploaded media, message history, codes or secrets.
+ * - Never blocks Tutor if it fails.
+ */
+function tutor_usage_log_demo_success(PDO $pdo, string $endpoint, array $meta = []): void {
+  static $allowed = [
+    'demo_start' => true,
+    'demo_chat' => true,
+  ];
+  if (!isset($allowed[$endpoint])) return;
+
+  $createdAt = gmdate('c');
+
+  $metaJson = null;
+  if (!empty($meta)) {
+    $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($metaJson)) $metaJson = null;
+    if (is_string($metaJson) && strlen($metaJson) > 2000) {
+      $metaJson = substr($metaJson, 0, 2000);
+    }
+  }
+
+  try {
+    $st = $pdo->prepare('INSERT INTO usage_events(student_id, endpoint, created_at, meta_json) VALUES(NULL,?,?,?)');
+    $st->execute([$endpoint, $createdAt, $metaJson]);
+  } catch (Throwable $e) {
+    error_log('Tutor usage_events demo insert failed: ' . $e->getMessage());
+  }
+}

@@ -740,6 +740,19 @@ body{
   color: rgba(255,255,255,0.95);
   outline: none;
 }
+.tutor-auth__demo{
+  display:flex;
+  gap: 10px;
+  align-items:center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.25);
+}
+.tutor-auth__demoText{ color: var(--muted); font-size: 12px; line-height: 1.4; }
 .tutor-auth__row{ display:flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .tutor-auth__error{ margin-top: 10px; color: #ffb4b4; font-size: 13px; }
 @media (max-width: 520px){

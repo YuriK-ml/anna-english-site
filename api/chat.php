@@ -727,7 +727,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
   ]);
 }
 
-tutor_access_gate();
+tutor_session_start();
+$studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+$isDemo = false;
+if ($studentId > 0) {
+  tutor_access_gate();
+} else {
+  // Stage 6.2C: demo mode (5 free text messages per PHP session)
+  $isDemo = isset($_SESSION['tutor_demo_active']) && $_SESSION['tutor_demo_active'] === 1;
+  if (!$isDemo) {
+    respond(401, ['error' => ['code' => 'auth_required', 'message' => 'Введите код доступа, чтобы пользоваться AI Tutor.']]);
+  }
+  $remaining = isset($_SESSION['tutor_demo_remaining']) ? (int)$_SESSION['tutor_demo_remaining'] : 0;
+  if ($remaining <= 0) {
+    respond(403, ['error' => ['code' => 'demo_limit', 'message' => 'Демо-лимит исчерпан. Чтобы продолжить, введите персональный код доступа.']]);
+  }
+}
 tutor_rate_limit_or_429('chat', 20, 60, 900);
 
 load_openai_config();
@@ -754,6 +769,9 @@ $strictness = validate_enum($strictness, $allowedStrict, 'strictness');
 $history = sanitize_history(pick($input, 'history', []));
 $imageDataUrl = validate_image_data_url_or_empty(pick($input, 'imageDataUrl', ''));
 $hasImage = $imageDataUrl !== '';
+if ($isDemo && $hasImage) {
+  respond(403, ['error' => ['code' => 'demo_text_only', 'message' => 'В демо-режиме доступны только текстовые сообщения.']]);
+}
 $lastUser = last_user_message($history);
 $imageOnly = $hasImage && trim($lastUser) === '[Image]';
 if (trim($lastUser) === '' && !$hasImage) {
@@ -817,10 +835,19 @@ $normalized = normalize_response($obj, $analysisLanguage);
 
 // Best-effort stats logging (must not block Tutor).
 try {
-  $studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
-  if ($studentId > 0) {
+  if ($isDemo) {
+    $remaining = isset($_SESSION['tutor_demo_remaining']) ? (int)$_SESSION['tutor_demo_remaining'] : 0;
+    if ($remaining > 0) {
+      $_SESSION['tutor_demo_remaining'] = $remaining - 1;
+    }
     $pdo = tutor_pdo();
-    tutor_usage_log_success($pdo, $studentId, 'chat');
+    tutor_usage_log_demo_success($pdo, 'demo_chat', ['model' => $model, 'topic' => $topic, 'level' => $level]);
+  } else {
+    $studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+    if ($studentId > 0) {
+      $pdo = tutor_pdo();
+      tutor_usage_log_success($pdo, $studentId, 'chat');
+    }
   }
 } catch (Throwable $e) {}
 

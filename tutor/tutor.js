@@ -8,6 +8,8 @@
   var SPEECH_URL = "/api/speech.php";
 
   var AUTH_URL = "/tutor/auth.php";
+  var SESSION_URL = "/tutor/session.php";
+  var DEMO_URL = "/tutor/demo.php";
   var TTS_RATES = [0.75, 0.85, 1, 1.15];
   var DEFAULT_TTS_RATE = 0.85;
   var IMAGE_MAX_DIM = 1024;
@@ -233,6 +235,10 @@ function applyStandaloneMode() {
   }
 
   function historyKey(topicId, level) {
+    // Keep demo conversations separate from student history in localStorage.
+    if (state && state.access && state.access.mode === "demo" && state.access.demoId) {
+      return "tutor_demo_" + state.access.demoId + "_history_" + topicId + "_" + level;
+    }
     return "tutor_history_" + topicId + "_" + level;
   }
 
@@ -320,6 +326,10 @@ function applyStandaloneMode() {
       '<div class="tutor-auth__title">Введите код доступа</div>' +
       '<div class="tutor-auth__text">Чтобы пользоваться AI-функциями, нужен персональный код.</div>' +
       '<input id="authCode" class="tutor-auth__input" inputmode="text" autocomplete="one-time-code" placeholder="Код" />' +
+      '<div class="tutor-auth__demo">' +
+      '  <div class="tutor-auth__demoText">5 бесплатных текстовых сообщений без регистрации.</div>' +
+      '  <button id="authDemoStart" class="tutor-btn tutor-btn--ghost" type="button">Попробовать бесплатно</button>' +
+      '</div>' +
       '<div class="tutor-auth__row">' +
       '<button id="authSubmit" class="tutor-btn" type="button">Открыть доступ</button>' +
       '<button id="authCancel" class="tutor-btn tutor-btn--ghost" type="button">Отмена</button>' +
@@ -352,6 +362,13 @@ function applyStandaloneMode() {
       submitAuthCode();
     });
 
+    var demoBtn = document.getElementById('authDemoStart');
+    if (demoBtn) {
+      demoBtn.addEventListener('click', function () {
+        startDemo();
+      });
+    }
+
     document.getElementById('authCode').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -370,6 +387,8 @@ function applyStandaloneMode() {
     if (!overlay) return;
     overlay.hidden = false;
     overlay.setAttribute("data-opened-at", String(Date.now()));
+
+    applyAccessUi();
 
     var err = document.getElementById("authError");
     if (err) {
@@ -442,6 +461,7 @@ function applyStandaloneMode() {
         var overlay = document.getElementById('authOverlay');
         if (overlay) overlay.hidden = true;
         showToast('Доступ открыт. Можно продолжать.');
+        syncAccessFromServer();
       })
       .catch(function (e) {
         console.error('auth error', e);
@@ -464,6 +484,159 @@ function applyStandaloneMode() {
       res.data.error.code === 'auth_required'
     );
   }
+
+  function demoExhausted() {
+    return !!(state && state.access && state.access.mode === "demo" && (state.access.remaining | 0) <= 0);
+  }
+
+  function applyAccessUi() {
+    if (!state || !state.access) return;
+    var mode = state.access.mode;
+
+    var mic = $("micBtn");
+    if (mic) {
+      if (mode === "demo") {
+        mic.disabled = true;
+      } else {
+        // Avoid overriding mic button state during recording/transcribing flows.
+        if (state.stt && state.stt.mode === "idle" && !state.stt.busy) mic.disabled = false;
+      }
+    }
+
+    var sendBtn = $("sendBtn");
+    if (sendBtn) {
+      sendBtn.disabled = !!state.busy || demoExhausted();
+    }
+
+    // Demo status in the existing hint line.
+    if (mode === "demo") {
+      var rem = (state.access.remaining | 0);
+      if (rem > 0) {
+        setVoiceHint("Демо: осталось " + rem + " из 5. В демо доступен только текст.", null);
+      } else {
+        setVoiceHint("Демо-лимит исчерпан. Введите код доступа, чтобы продолжить.", "is-error");
+      }
+    }
+
+    // Hide demo CTA inside auth modal once demo is active (or student is authorized).
+    var demoBtn = document.getElementById("authDemoStart");
+    if (demoBtn) {
+      demoBtn.style.display = mode === "guest" ? "" : "none";
+      demoBtn.disabled = false;
+    }
+  }
+
+  function setAccess(mode, demoId, remaining) {
+    if (!state || !state.access) return;
+    state.access.mode = mode;
+    state.access.demoId = demoId || "";
+    state.access.remaining = typeof remaining === "number" ? remaining : (state.access.remaining | 0);
+    applyAccessUi();
+  }
+
+  function syncAccessFromServer() {
+    return fetch(SESSION_URL, { method: "GET", cache: "no-store", credentials: "same-origin" })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () { return null; })
+          .then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
+      })
+      .then(function (res) {
+        if (!res || !res.ok || !res.data || typeof res.data !== "object") return;
+        var mode = typeof res.data.mode === "string" ? res.data.mode : "guest";
+        if (mode === "student") {
+          setAccess("student", "", 0);
+          // If we are inside a chat, reload student history key after login.
+          if (state.view === "chat" && state.topicId) {
+            var lvl = getSelectedLevel();
+            var t = findTopic(state.topicId);
+            if (t) {
+              var msgs = ensureStarter(t, loadHistory(state.topicId, lvl));
+              saveHistory(state.topicId, lvl, msgs);
+              renderMessages(msgs);
+            }
+          }
+          return;
+        }
+        if (mode === "demo") {
+          var rem = parseInt(String(res.data.remaining || 0), 10) || 0;
+          var id = typeof res.data.demoId === "string" ? res.data.demoId : "";
+          setAccess("demo", id, rem);
+          if (rem <= 0) {
+            // Demo exhausted: allow entering the access code (also after refresh).
+            setTimeout(function () {
+              openAuthModal("Демо-лимит исчерпан. Введите персональный код доступа, чтобы продолжить.");
+            }, 0);
+          }
+          return;
+        }
+        setAccess("guest", "", 0);
+      })
+      .catch(function () {});
+  }
+
+  function startDemo() {
+    if (!state || !state.access) return;
+    if (state.access.mode !== "guest") return;
+
+    var btn = document.getElementById("authDemoStart");
+    if (btn) btn.disabled = true;
+
+    fetch(DEMO_URL, { method: "POST", cache: "no-store", credentials: "same-origin" })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () { return null; })
+          .then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
+      })
+      .then(function (res) {
+        if (!res || !res.ok || !res.data || typeof res.data !== "object") {
+          throw new Error("Не удалось запустить демо.");
+        }
+        if (res.data.mode === "student") {
+          setAccess("student", "", 0);
+          var overlay = document.getElementById("authOverlay");
+          if (overlay) overlay.hidden = true;
+          return;
+        }
+        if (res.data.mode !== "demo") {
+          throw new Error("Не удалось запустить демо.");
+        }
+        var rem = parseInt(String(res.data.remaining || 0), 10) || 0;
+        var id = typeof res.data.demoId === "string" ? res.data.demoId : "";
+        setAccess("demo", id, rem);
+
+        // Reset chat view to demo history (do not mix with student history).
+        if (state.view === "chat" && state.topicId) {
+          var lvl = getSelectedLevel();
+          var t = findTopic(state.topicId);
+          if (t) {
+            var msgs = ensureStarter(t, loadHistory(state.topicId, lvl));
+            saveHistory(state.topicId, lvl, msgs);
+            renderMessages(msgs);
+            renderAnalysisEmpty();
+          }
+        }
+
+        var overlay = document.getElementById("authOverlay");
+        if (overlay) overlay.hidden = true;
+        showToast("Демо включено. Можно отправить до 5 сообщений.");
+        try { $("chatInput").focus(); } catch (e) {}
+      })
+      .catch(function (e) {
+        console.error("demo start error", e);
+        var err = document.getElementById("authError");
+        if (err) {
+          err.textContent = (e && e.message) ? e.message : "Не удалось запустить демо.";
+          err.hidden = false;
+        }
+      })
+      .finally(function () {
+        if (btn) btn.disabled = false;
+      });
+  }
+
   function hintEl() {
     return document.querySelector(".tutor-hint");
   }
@@ -478,6 +651,7 @@ function applyStandaloneMode() {
 
   function voiceHintReady() {
     setVoiceHint("Можно говорить или вводить текст с клавиатуры.", null);
+    applyAccessUi();
   }
 
 
@@ -749,6 +923,10 @@ function applyStandaloneMode() {
 
   function handlePaste(e) {
     if (!e || !e.clipboardData || !e.clipboardData.items) return;
+    if (state && state.access && state.access.mode === "demo") {
+      showToast("Изображения доступны после авторизации.");
+      return;
+    }
     var items = e.clipboardData.items;
     var file = null;
     for (var i = 0; i < items.length; i++) {
@@ -818,6 +996,11 @@ function applyStandaloneMode() {
 
   function ttsPlay(messageTs, text) {
     if (!text) return;
+
+    if (state && state.access && state.access.mode === "demo") {
+      showToast("Озвучивание доступно после авторизации.");
+      return;
+    }
 
     // Stop currently playing audio or any in-flight request.
     ttsStop();
@@ -1205,6 +1388,11 @@ function applyStandaloneMode() {
     if (!state.topicId) return;
     if (!state.stt) return;
 
+    if (state.access && state.access.mode === "demo") {
+      showToast("Голосовой ввод доступен после авторизации.");
+      return;
+    }
+
     if (state.stt.mode === "recording") {
       sttStopRecording();
       return;
@@ -1489,11 +1677,12 @@ function applyStandaloneMode() {
 
   function setBusy(isBusy) {
     state.busy = !!isBusy;
-    $("sendBtn").disabled = state.busy;
+    $("sendBtn").disabled = state.busy || demoExhausted();
     $("chatInput").disabled = state.busy;
     $("restartBtn").disabled = state.busy;
     $("backBtn").disabled = state.busy;
     if (!state.busy) $("chatInput").focus();
+    applyAccessUi();
   }
 
   function toApiHistory(messages) {
@@ -1580,9 +1769,24 @@ function applyStandaloneMode() {
     var topic = findTopic(state.topicId);
     if (!topic) return;
 
+    if (demoExhausted()) {
+      showToast("Демо-лимит исчерпан. Введите код доступа, чтобы продолжить.");
+      applyAccessUi();
+      setTimeout(function () {
+        openAuthModal("Демо-лимит исчерпан. Введите персональный код доступа, чтобы продолжить.");
+      }, 0);
+      return;
+    }
+
     var input = $("chatInput");
     var text = (input.value || "").trim();
     var hasImage = !!(state.compose && state.compose.imageDataUrl);
+    if (state && state.access && state.access.mode === "demo" && hasImage) {
+      // Demo is text-only (Stage 6.2C)
+      showToast("Изображения доступны после авторизации.");
+      clearComposeImage();
+      hasImage = false;
+    }
     var sendText = text;
     if (!sendText && hasImage) sendText = "[Image]";
     if (!sendText) return;
@@ -1618,6 +1822,10 @@ function applyStandaloneMode() {
         }
 
         if (!res || !res.ok || !res.data || typeof res.data !== "object") {
+          if (res && res.data && res.data.error && res.data.error.code === "demo_limit") {
+            // Demo mode exhausted on server side.
+            setAccess("demo", (state && state.access ? state.access.demoId : ""), 0);
+          }
           var msg =
             res && res.data && res.data.error && typeof res.data.error.message === "string"
               ? res.data.error.message
@@ -1639,6 +1847,17 @@ function applyStandaloneMode() {
 
         clearComposeImage();
         input.value = "";
+
+        if (state && state.access && state.access.mode === "demo") {
+          state.access.remaining = Math.max(0, (state.access.remaining | 0) - 1);
+          applyAccessUi();
+          if ((state.access.remaining | 0) <= 0) {
+            // Demo exhausted: let the visitor switch to full Tutor by entering a code.
+            setTimeout(function () {
+              openAuthModal("Демо-лимит исчерпан. Введите персональный код доступа, чтобы продолжить.");
+            }, 0);
+          }
+        }
       })
       .catch(function (e) {
         if (e && e.message === "auth_required") {
@@ -1745,6 +1964,7 @@ function applyStandaloneMode() {
     level: getSelectedLevel(),
     topicId: null,
     busy: false,
+    access: { mode: "guest", demoId: "", remaining: 0 },
     lastAnalysis: null,
     stt: { mode: "idle", recorder: null, stream: null, chunks: [], mimeType: "", busy: false, aborting: false },
     tts: { reqId: 0, audio: null, url: "", playingTs: null, busy: false, busyTs: null, playbackRate: getTtsRate(), abortCtrl: null },
@@ -1759,8 +1979,11 @@ function applyStandaloneMode() {
     bindControls();
     ensureTtsDisclosure();
     ensureTtsRateControl();
-    bootFromHash();
-    renderAnalysisEmpty();
+    syncAccessFromServer().finally(function () {
+      bootFromHash();
+      renderAnalysisEmpty();
+      applyAccessUi();
+    });
   }
 
   if (document.readyState === "loading") {

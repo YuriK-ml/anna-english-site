@@ -232,6 +232,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 $students = [];
 $summaryToday = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
 $summaryMonth = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
+$demoAll = ['demo_start' => 0, 'demo_chat' => 0, 'last_utc' => ''];
+$demoToday = ['demo_start' => 0, 'demo_chat' => 0];
+$demoMonth = ['demo_start' => 0, 'demo_chat' => 0];
 
 function msk_dt(string $utcIso): string {
   $utcIso = trim($utcIso);
@@ -265,6 +268,30 @@ function load_usage_summary(PDO $pdo, string $startUtc, string $endUtc): array {
   return $out;
 }
 
+function load_demo_summary(PDO $pdo, string $startUtc, string $endUtc): array {
+  $out = ['demo_start' => 0, 'demo_chat' => 0];
+  try {
+    $st = $pdo->prepare(
+      "SELECT endpoint, COUNT(*) AS c FROM usage_events " .
+      "WHERE student_id IS NULL AND created_at >= ? AND created_at < ? " .
+      "AND endpoint IN ('demo_start','demo_chat') GROUP BY endpoint"
+    );
+    $st->execute([$startUtc, $endUtc]);
+    $rows = $st->fetchAll();
+    if (is_array($rows)) {
+      foreach ($rows as $r) {
+        $ep = is_array($r) ? (string)($r['endpoint'] ?? '') : '';
+        if ($ep !== '' && array_key_exists($ep, $out)) {
+          $out[$ep] = (int)($r['c'] ?? 0);
+        }
+      }
+    }
+  } catch (Throwable $e) {
+    error_log('Admin demo summary failed: ' . $e->getMessage());
+  }
+  return $out;
+}
+
 try {
   // Students + per-student totals
   $sql =
@@ -294,6 +321,28 @@ try {
 }
 
 // Summary: store UTC in DB, but count by Moscow day/month boundaries.
+
+// Demo totals (student_id IS NULL)
+try {
+  $st = $pdo->query(
+    "SELECT
+      SUM(CASE WHEN endpoint='demo_start' THEN 1 ELSE 0 END) AS demo_start,
+      SUM(CASE WHEN endpoint='demo_chat' THEN 1 ELSE 0 END) AS demo_chat,
+      MAX(created_at) AS last_utc
+    FROM usage_events
+    WHERE student_id IS NULL AND endpoint IN ('demo_start','demo_chat')"
+  );
+  $row = $st ? $st->fetch() : null;
+  if (is_array($row)) {
+    $demoAll['demo_start'] = (int)($row['demo_start'] ?? 0);
+    $demoAll['demo_chat'] = (int)($row['demo_chat'] ?? 0);
+    $demoAll['last_utc'] = (string)($row['last_utc'] ?? '');
+  }
+} catch (Throwable $e) {
+  error_log('Admin demo totals failed: ' . $e->getMessage());
+}
+
+// Summary: store UTC in DB, but count by Moscow day/month boundaries.
 try {
   $tzMsk = new DateTimeZone('Europe/Moscow');
   $tzUtc = new DateTimeZone('UTC');
@@ -308,6 +357,8 @@ try {
 
   $summaryToday = load_usage_summary($pdo, $todayStartUtc, $todayEndUtc);
   $summaryMonth = load_usage_summary($pdo, $monthStartUtc, $monthEndUtc);
+  $demoToday = load_demo_summary($pdo, $todayStartUtc, $todayEndUtc);
+  $demoMonth = load_demo_summary($pdo, $monthStartUtc, $monthEndUtc);
 } catch (Throwable $e) {
   error_log('Admin summary window failed: ' . $e->getMessage());
 }
@@ -439,6 +490,7 @@ try {
               <div class="kpi"><div class="v"><?php echo (int)$summaryToday['stt']; ?></div><div class="l">STT</div></div>
               <div class="kpi"><div class="v"><?php echo (int)$summaryToday['tts']; ?></div><div class="l">TTS</div></div>
             </div>
+            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoToday['demo_start']; ?></b> · Chat <b><?php echo (int)$demoToday['demo_chat']; ?></b></div>
           </div>
 
           <div class="stats-block">
@@ -449,6 +501,7 @@ try {
               <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['stt']; ?></div><div class="l">STT</div></div>
               <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['tts']; ?></div><div class="l">TTS</div></div>
             </div>
+            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoMonth['demo_start']; ?></b> · Chat <b><?php echo (int)$demoMonth['demo_chat']; ?></b></div>
           </div>
         </div>
       </div>
@@ -465,6 +518,24 @@ try {
             </tr>
           </thead>
           <tbody>
+            <?php
+              $demoStarts = (int)($demoAll['demo_start'] ?? 0);
+              $demoChats = (int)($demoAll['demo_chat'] ?? 0);
+              $demoLastUtc = (string)($demoAll['last_utc'] ?? '');
+              $demoLastMsk = $demoLastUtc !== '' ? msk_dt($demoLastUtc) : '';
+            ?>
+            <tr>
+              <td>—</td>
+              <td><b>Демо‑посетители</b></td>
+              <td><span class="badge off">Demo</span></td>
+              <td class="muted">
+                <div>Запуски демо: <b><?php echo $demoStarts; ?></b></div>
+                <div>Последняя активность: <b><?php echo $demoLastMsk !== '' ? h($demoLastMsk) : '—'; ?></b></div>
+                <div>Chat: <b><?php echo $demoChats; ?></b> · STT: <b>0</b> · TTS: <b>0</b></div>
+              </td>
+              <td class="muted">—</td>
+            </tr>
+
           <?php foreach ($students as $st):
             $id = (int)($st['id'] ?? 0);
             $name = (string)($st['name'] ?? '');
