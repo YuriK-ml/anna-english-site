@@ -142,13 +142,29 @@ function isStandaloneMode() {
   }
 }
 
-function applyStandaloneMode() {
-  if (!isStandaloneMode()) return;
-  // Hide only the 'back to main site' link in standalone mode (keep other controls like logout).
-  var back = document.getElementById('backToSiteLink');
-  if (back) back.style.display = 'none';
+function applyNavUi() {
   var top = document.querySelector('.tutor-hero__top');
-  if (top) top.style.justifyContent = 'flex-end';
+  var back = document.getElementById('backToSiteLink');
+  var logout = document.getElementById('logoutLink');
+
+  var view = (typeof state === 'object' && state && typeof state.view === 'string') ? state.view : 'home';
+  var mode = (state && state.access && typeof state.access.mode === 'string') ? state.access.mode : 'guest';
+  var standalone = isStandaloneMode();
+
+  var showBack = (view === 'home') && !standalone;
+  var showLogout = (view === 'home') && (mode === 'student');
+
+  if (back) back.style.display = showBack ? '' : 'none';
+  if (logout) {
+    logout.style.display = showLogout ? '' : 'none';
+    logout.setAttribute('href', standalone ? '/tutor/logout.php?mode=standalone' : '/tutor/logout.php');
+  }
+
+  if (top) top.style.display = (view === 'home' && (showBack || showLogout)) ? '' : 'none';
+}
+
+function applyStandaloneMode() {
+  applyNavUi();
 }
 
   function safeJsonParse(raw, fallback) {
@@ -524,6 +540,8 @@ function applyStandaloneMode() {
       demoBtn.style.display = mode === "guest" ? "" : "none";
       demoBtn.disabled = false;
     }
+
+    applyNavUi();
   }
 
   function setAccess(mode, demoId, remaining) {
@@ -1464,6 +1482,7 @@ function applyStandaloneMode() {
     state.view = name;
     $("view-home").hidden = name !== "home";
     $("view-chat").hidden = name !== "chat";
+    applyNavUi();
   }
 
   function findTopic(topicId) {
