@@ -13,7 +13,6 @@
     <div class="tutor-hero__inner">
       <div class="tutor-hero__top">
         <a id="backToSiteLink" class="tutor-link" href="/">← На сайт Анны</a>
-        <a id="logoutLink" class="tutor-link" href="/tutor/logout.php" style="display:none">Выйти из аккаунта</a>
       </div>
 
       <h1 class="tutor-title">AI English Tutor</h1>
@@ -24,7 +23,10 @@
   <main class="tutor-wrap">
     <section id="view-home" class="tutor-section">
       <div class="tutor-section__header">
-        <h2 class="tutor-h2">Уровень</h2>
+        <div class="tutor-section__headrow">
+          <h2 class="tutor-h2">Уровень</h2>
+          <a id="logoutLink" class="tutor-link tutor-link--logout" href="/tutor/logout.php" style="display:none">Выйти из аккаунта</a>
+        </div>
         <p class="tutor-muted">Выберите уровень — он сохранится на этом устройстве.</p>
       </div>
       <div id="levelPicker" class="tutor-levels" aria-label="Выбор уровня"></div>

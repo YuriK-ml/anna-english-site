@@ -87,6 +87,23 @@ body{
   margin-bottom: 10px;
 }
 
+
+.tutor-section__headrow{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tutor-section__headrow .tutor-h2{
+  margin: 0;
+}
+
+.tutor-link--logout{
+  white-space: nowrap;
+}
+
 .tutor-h2{
   margin: 0 0 6px;
   font-size: 18px;

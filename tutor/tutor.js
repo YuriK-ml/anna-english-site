@@ -160,7 +160,7 @@ function applyNavUi() {
     logout.setAttribute('href', standalone ? '/tutor/logout.php?mode=standalone' : '/tutor/logout.php');
   }
 
-  if (top) top.style.display = (view === 'home' && (showBack || showLogout)) ? '' : 'none';
+  if (top) top.style.display = showBack ? '' : 'none';
 }
 
 function applyStandaloneMode() {
