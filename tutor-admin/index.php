@@ -422,7 +422,7 @@ try {
   <div class="wrap">
     <div class="top">
       <h1>Tutor Admin</h1>
-      <a href="/tutor/">← В Tutor</a>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:flex-end;"><a href="/tutor/">← В Tutor</a><a href="/tutor-admin/analytics.php">Аналитика сайта</a></div>
     </div>
 
     <?php if ($flash !== ''): ?>

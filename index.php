@@ -615,7 +615,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
         <div class="card">
             <h3>🧠 Подобрать программу</h3>
             <p>AI определит уровень и предложит персональный план обучения</p>
-            <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" target="_blank">
+            <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" data-ana-out="ai_diagnostics" target="_blank">
                 Начать
             </a>
         </div>
@@ -672,7 +672,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
         <div class="card">
             <h3>🧠 Подобрать программу</h3>
             <p>AI определит уровень и предложит персональный план обучения</p>
-            <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" target="_blank">
+            <a class="button" href="https://english-with-anna-ai-1023185279452.us-west1.run.app" data-ana-out="ai_diagnostics" target="_blank">
                 Начать
             </a>
         </div>
@@ -721,7 +721,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
     </p>
 
     <div class="hero-actions" style="justify-content:center; margin-top:14px;">
-        <a href="https://t.me/anna_english_ai" target="_blank" class="button button-ghost">
+        <a href="https://t.me/anna_english_ai" data-ana-out="tg_channel" target="_blank" class="button button-ghost">
             Написать в Telegram
         </a>
     </div>
@@ -754,6 +754,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
     </div>
 </div>
 
+<script defer src="/analytics.js"></script>
+
 <script>
 const accounts = [
     {email:"test.english1@mail.ru", password:"0405", name:"Test1"},
@@ -780,8 +782,7 @@ async function startTest() {
 
     // 👉 2-й клик — открываем тест
     if (testReady) {
-        window.open(savedLoginUrl, "_blank");
-        return;
+        if (window.annaAnalytics && typeof window.annaAnalytics.trackOut === 'function') {\r\n            window.annaAnalytics.trackOut('progressme_test');\r\n        }\r\n        window.open(savedLoginUrl, '_blank');\r\n        return;
     }
 
     const name = document.getElementById("userName").value;
