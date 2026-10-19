@@ -286,7 +286,8 @@ function tutor_access_gate(): void {
     tutor_json_respond(500, ['error' => ['code' => 'server_config', 'message' => 'Сервер не настроен.']]);
   }
 
-  if (!$row || (int)$row['archived'] === 1 || (int)$row['active'] !== 1) {
+  // Archived status is deprecated; access is controlled only by `active`.
+  if (!$row || (int)$row['active'] !== 1) {
     tutor_clear_student_session();
     tutor_json_respond(401, ['error' => ['code' => 'auth_required', 'message' => 'Доступ отключён. Введите код доступа.']]);
   }
@@ -346,6 +347,8 @@ function tutor_usage_log_demo_success(PDO $pdo, string $endpoint, array $meta = 
   static $allowed = [
     'demo_start' => true,
     'demo_chat' => true,
+    'demo_stt' => true,
+    'demo_tts' => true,
   ];
   if (!isset($allowed[$endpoint])) return;
 

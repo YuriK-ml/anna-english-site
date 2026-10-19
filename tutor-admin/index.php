@@ -47,6 +47,9 @@ function generate_code(int $len = 18): string {
 $flash = '';
 $flashType = 'info';
 $oneTimeCode = '';
+$deletePendingId = 0;
+$deletePendingToken = '';
+$deletePendingName = '';
 
 // One-time flash message (PRG)
 if (isset($_SESSION['tutor_admin_flash']) && is_string($_SESSION['tutor_admin_flash'])) {
@@ -64,6 +67,14 @@ if (isset($_SESSION['tutor_admin_one_time_code']) && is_string($_SESSION['tutor_
 }
 unset($_SESSION['tutor_admin_one_time_code']);
 
+// Pending delete confirmation (2-step).
+if (isset($_SESSION['tutor_admin_delete_pending']) && is_array($_SESSION['tutor_admin_delete_pending'])) {
+  $p = $_SESSION['tutor_admin_delete_pending'];
+  $deletePendingId = isset($p['id']) ? (int)$p['id'] : 0;
+  $deletePendingToken = isset($p['token']) && is_string($p['token']) ? (string)$p['token'] : '';
+  $deletePendingName = isset($p['name']) && is_string($p['name']) ? (string)$p['name'] : '';
+}
+
 // Load admin password hash from private config
 // Expected in private/tutor_auth_config.php:
 // define('TUTOR_ADMIN_PASSWORD_HASH', '...');
@@ -79,6 +90,15 @@ try {
   http_response_code(500);
   echo 'Server is not configured.';
   exit;
+}
+
+// Migration: Archived status is deprecated. Treat archived students as Disabled.
+try {
+  $now = gmdate('c');
+  $st = $pdo->prepare('UPDATE students SET active=0, archived=0, updated_at=? WHERE archived=1');
+  $st->execute([$now]);
+} catch (Throwable $e) {
+  // Best-effort only.
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -168,49 +188,103 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     try {
       $st = $pdo->prepare('UPDATE students SET active=?, updated_at=? WHERE id=?');
       $st->execute([$active, $now, $id]);
-      $flash = 'Сохранено.';
+      $flash = $active ? 'Доступ включён.' : 'Доступ отключён.';
       $flashType = 'ok';
     } catch (Throwable $e) {
       error_log('Admin toggle_active failed: ' . $e->getMessage());
       $flash = 'Не удалось изменить доступ.';
       $flashType = 'error';
     }
-  } elseif ($action === 'archive_student') {
+  } elseif ($action === 'delete_student') {
     csrf_check_or_403();
     require_admin();
+    // Deprecated action name: keep for backward compatibility if any old forms exist.
+    $flash = 'Для удаления используйте двухэтапное подтверждение.';
+    $flashType = 'error';
+  } elseif ($action === 'delete_student_prepare') {
+    csrf_check_or_403();
+    require_admin();
+
     $id = (int)($_POST['id'] ?? 0);
-    $now = gmdate('c');
-    try {
-      $st = $pdo->prepare('UPDATE students SET archived=1, active=0, updated_at=? WHERE id=?');
-      $st->execute([$now, $id]);
-      $flash = 'Ученик архивирован.';
-      $flashType = 'ok';
-    } catch (Throwable $e) {
-      error_log('Admin archive_student failed: ' . $e->getMessage());
-      $flash = 'Не удалось архивировать.';
+    if ($id <= 0) {
+      $flash = 'Некорректный ученик.';
       $flashType = 'error';
+    } else {
+      try {
+        $st = $pdo->prepare('SELECT id, name FROM students WHERE id = ? LIMIT 1');
+        $st->execute([$id]);
+        $row = $st->fetch();
+        if (!is_array($row)) {
+          $flash = 'Ученик не найден.';
+          $flashType = 'error';
+        } else {
+          $_SESSION['tutor_admin_delete_pending'] = [
+            'id' => (int)($row['id'] ?? 0),
+            'name' => (string)($row['name'] ?? ''),
+            'token' => bin2hex(random_bytes(16)),
+            'at' => time(),
+          ];
+          $flash = '';
+          $flashType = 'info';
+        }
+      } catch (Throwable $e) {
+        error_log('Admin delete_student_prepare failed: ' . $e->getMessage());
+        $flash = 'Не удалось подготовить удаление.';
+        $flashType = 'error';
+      }
     }
-  }
-
-  elseif ($action === 'purge_archive') {
+  } elseif ($action === 'delete_student_cancel') {
+    csrf_check_or_403();
+    require_admin();
+    unset($_SESSION['tutor_admin_delete_pending']);
+    $flash = 'Удаление отменено.';
+    $flashType = 'ok';
+  } elseif ($action === 'delete_student_confirm') {
     csrf_check_or_403();
     require_admin();
 
-    try {
-      $deleted = $pdo->exec(
-        "DELETE FROM students " .
-        "WHERE archived = 1 " .
-        "AND NOT EXISTS (SELECT 1 FROM usage_events ue WHERE ue.student_id = students.id)"
-      );
-      if ($deleted === false) {
-        throw new RuntimeException('SQLite delete failed');
-      }
-      $flash = 'Удалено архивных учеников без активности: ' . (int)$deleted;
-      $flashType = 'ok';
-    } catch (Throwable $e) {
-      error_log('Admin purge_archive failed: ' . $e->getMessage());
-      $flash = 'Не удалось очистить архив.';
+    $id = (int)($_POST['id'] ?? 0);
+    $token = (string)($_POST['token'] ?? '');
+
+    $pending = (isset($_SESSION['tutor_admin_delete_pending']) && is_array($_SESSION['tutor_admin_delete_pending']))
+      ? $_SESSION['tutor_admin_delete_pending']
+      : null;
+    $pendingId = is_array($pending) && isset($pending['id']) ? (int)$pending['id'] : 0;
+    $pendingToken = is_array($pending) && isset($pending['token']) && is_string($pending['token']) ? (string)$pending['token'] : '';
+
+    if ($id <= 0 || $token === '' || $pendingId <= 0 || $pendingToken === '') {
+      $flash = 'Подтверждение удаления не найдено.';
       $flashType = 'error';
+    } elseif ($id !== $pendingId || !hash_equals($pendingToken, $token)) {
+      $flash = 'Подтверждение удаления недействительно.';
+      $flashType = 'error';
+    } else {
+      try {
+        $pdo->beginTransaction();
+
+        $st1 = $pdo->prepare('DELETE FROM usage_events WHERE student_id = ?');
+        $st1->execute([$id]);
+
+        $st2 = $pdo->prepare('DELETE FROM students WHERE id = ?');
+        $st2->execute([$id]);
+        $deleted = (int)$st2->rowCount();
+
+        $pdo->commit();
+        unset($_SESSION['tutor_admin_delete_pending']);
+
+        if ($deleted > 0) {
+          $flash = 'Ученик удалён безвозвратно.';
+          $flashType = 'ok';
+        } else {
+          $flash = 'Ученик не найден.';
+          $flashType = 'error';
+        }
+      } catch (Throwable $e) {
+        try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $e2) {}
+        error_log('Admin delete_student_confirm failed: ' . $e->getMessage());
+        $flash = 'Не удалось удалить ученика.';
+        $flashType = 'error';
+      }
     }
   }
 
@@ -232,9 +306,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 $students = [];
 $summaryToday = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
 $summaryMonth = ['login' => 0, 'chat' => 0, 'stt' => 0, 'tts' => 0];
-$demoAll = ['demo_start' => 0, 'demo_chat' => 0, 'last_utc' => ''];
-$demoToday = ['demo_start' => 0, 'demo_chat' => 0];
-$demoMonth = ['demo_start' => 0, 'demo_chat' => 0];
+$demoAll = ['demo_start' => 0, 'demo_chat' => 0, 'demo_stt' => 0, 'demo_tts' => 0, 'last_utc' => ''];
+$demoToday = ['demo_start' => 0, 'demo_chat' => 0, 'demo_stt' => 0, 'demo_tts' => 0];
+$demoMonth = ['demo_start' => 0, 'demo_chat' => 0, 'demo_stt' => 0, 'demo_tts' => 0];
 
 function msk_dt(string $utcIso): string {
   $utcIso = trim($utcIso);
@@ -269,12 +343,12 @@ function load_usage_summary(PDO $pdo, string $startUtc, string $endUtc): array {
 }
 
 function load_demo_summary(PDO $pdo, string $startUtc, string $endUtc): array {
-  $out = ['demo_start' => 0, 'demo_chat' => 0];
+  $out = ['demo_start' => 0, 'demo_chat' => 0, 'demo_stt' => 0, 'demo_tts' => 0];
   try {
     $st = $pdo->prepare(
       "SELECT endpoint, COUNT(*) AS c FROM usage_events " .
       "WHERE student_id IS NULL AND created_at >= ? AND created_at < ? " .
-      "AND endpoint IN ('demo_start','demo_chat') GROUP BY endpoint"
+      "AND endpoint IN ('demo_start','demo_chat','demo_stt','demo_tts') GROUP BY endpoint"
     );
     $st->execute([$startUtc, $endUtc]);
     $rows = $st->fetchAll();
@@ -295,7 +369,7 @@ function load_demo_summary(PDO $pdo, string $startUtc, string $endUtc): array {
 try {
   // Students + per-student totals
   $sql =
-    'SELECT s.id, s.name, s.active, s.archived, s.created_at, s.updated_at,' .
+    'SELECT s.id, s.name, s.active, s.created_at, s.updated_at,' .
     ' COALESCE(u.login_count,0) AS login_count,' .
     ' COALESCE(u.chat_count,0) AS chat_count,' .
     ' COALESCE(u.stt_count,0) AS stt_count,' .
@@ -328,14 +402,18 @@ try {
     "SELECT
       SUM(CASE WHEN endpoint='demo_start' THEN 1 ELSE 0 END) AS demo_start,
       SUM(CASE WHEN endpoint='demo_chat' THEN 1 ELSE 0 END) AS demo_chat,
+      SUM(CASE WHEN endpoint='demo_stt' THEN 1 ELSE 0 END) AS demo_stt,
+      SUM(CASE WHEN endpoint='demo_tts' THEN 1 ELSE 0 END) AS demo_tts,
       MAX(created_at) AS last_utc
     FROM usage_events
-    WHERE student_id IS NULL AND endpoint IN ('demo_start','demo_chat')"
+    WHERE student_id IS NULL AND endpoint IN ('demo_start','demo_chat','demo_stt','demo_tts')"
   );
   $row = $st ? $st->fetch() : null;
   if (is_array($row)) {
     $demoAll['demo_start'] = (int)($row['demo_start'] ?? 0);
     $demoAll['demo_chat'] = (int)($row['demo_chat'] ?? 0);
+    $demoAll['demo_stt'] = (int)($row['demo_stt'] ?? 0);
+    $demoAll['demo_tts'] = (int)($row['demo_tts'] ?? 0);
     $demoAll['last_utc'] = (string)($row['last_utc'] ?? '');
   }
 } catch (Throwable $e) {
@@ -421,8 +499,20 @@ try {
 <body>
   <div class="wrap">
     <div class="top">
-      <h1>Tutor Admin</h1>
-      <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:flex-end;"><a href="/tutor/">← В Tutor</a><a href="/tutor-admin/analytics.php">Аналитика сайта</a></div>
+      <div class="row" style="justify-content:flex-start;">
+        <h1 style="margin:0;">Tutor Admin</h1>
+        <?php if (is_admin()): ?>
+          <form method="post" style="margin:0;">
+            <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+            <input type="hidden" name="action" value="admin_logout" />
+            <button class="ghost" type="submit">Выйти</button>
+          </form>
+        <?php endif; ?>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;">
+        <a href="/tutor-admin/analytics.php">📊 Аналитика сайта →</a>
+      </div>
     </div>
 
     <?php if ($flash !== ''): ?>
@@ -447,28 +537,6 @@ try {
       </div>
     <?php else: ?>
       <div class="card">
-        <div class="row" style="justify-content: space-between;">
-          <div>
-            <h2>Ученики</h2>
-            <div class="muted">Коды хранятся только в виде защищённых хешей. Показ кода — один раз при создании/перевыпуске.</div>
-          </div>
-          <div class="row" style="justify-content:flex-end;">
-            <form method="post" style="margin:0;" onsubmit="return confirm('Удалить всех архивных учеников без активности?');">
-              <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
-              <input type="hidden" name="action" value="purge_archive" />
-              <button class="ghost" type="submit">Очистить архив</button>
-            </form>
-
-            <form method="post" style="margin:0;">
-              <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
-              <input type="hidden" name="action" value="admin_logout" />
-              <button class="ghost" type="submit">Выйти</button>
-            </form>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
         <h2>Добавить ученика</h2>
         <form method="post" class="row">
           <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
@@ -476,6 +544,7 @@ try {
           <input name="name" placeholder="Имя" maxlength="80" required />
           <button type="submit">Создать и показать код</button>
         </form>
+        <div class="muted" style="margin-top:10px;">Коды хранятся только в виде защищённых хешей. Показ кода — один раз при создании/перевыпуске.</div>
       </div>
 
       <div class="card">
@@ -490,7 +559,7 @@ try {
               <div class="kpi"><div class="v"><?php echo (int)$summaryToday['stt']; ?></div><div class="l">STT</div></div>
               <div class="kpi"><div class="v"><?php echo (int)$summaryToday['tts']; ?></div><div class="l">TTS</div></div>
             </div>
-            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoToday['demo_start']; ?></b> · Chat <b><?php echo (int)$demoToday['demo_chat']; ?></b></div>
+            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoToday['demo_start']; ?></b> · Chat <b><?php echo (int)$demoToday['demo_chat']; ?></b> · STT <b><?php echo (int)$demoToday['demo_stt']; ?></b> · TTS <b><?php echo (int)$demoToday['demo_tts']; ?></b></div>
           </div>
 
           <div class="stats-block">
@@ -501,7 +570,7 @@ try {
               <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['stt']; ?></div><div class="l">STT</div></div>
               <div class="kpi"><div class="v"><?php echo (int)$summaryMonth['tts']; ?></div><div class="l">TTS</div></div>
             </div>
-            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoMonth['demo_start']; ?></b> · Chat <b><?php echo (int)$demoMonth['demo_chat']; ?></b></div>
+            <div class="muted" style="margin-top:8px;">Демо: запуски <b><?php echo (int)$demoMonth['demo_start']; ?></b> · Chat <b><?php echo (int)$demoMonth['demo_chat']; ?></b> · STT <b><?php echo (int)$demoMonth['demo_stt']; ?></b> · TTS <b><?php echo (int)$demoMonth['demo_tts']; ?></b></div>
           </div>
         </div>
       </div>
@@ -521,6 +590,8 @@ try {
             <?php
               $demoStarts = (int)($demoAll['demo_start'] ?? 0);
               $demoChats = (int)($demoAll['demo_chat'] ?? 0);
+              $demoStt = (int)($demoAll['demo_stt'] ?? 0);
+              $demoTts = (int)($demoAll['demo_tts'] ?? 0);
               $demoLastUtc = (string)($demoAll['last_utc'] ?? '');
               $demoLastMsk = $demoLastUtc !== '' ? msk_dt($demoLastUtc) : '';
             ?>
@@ -531,7 +602,7 @@ try {
               <td class="muted">
                 <div>Запуски демо: <b><?php echo $demoStarts; ?></b></div>
                 <div>Последняя активность: <b><?php echo $demoLastMsk !== '' ? h($demoLastMsk) : '—'; ?></b></div>
-                <div>Chat: <b><?php echo $demoChats; ?></b> · STT: <b>0</b> · TTS: <b>0</b></div>
+                <div>Chat: <b><?php echo $demoChats; ?></b> · STT: <b><?php echo $demoStt; ?></b> · TTS: <b><?php echo $demoTts; ?></b></div>
               </td>
               <td class="muted">—</td>
             </tr>
@@ -540,15 +611,12 @@ try {
             $id = (int)($st['id'] ?? 0);
             $name = (string)($st['name'] ?? '');
             $active = (int)($st['active'] ?? 0) === 1;
-            $archived = (int)($st['archived'] ?? 0) === 1;
           ?>
             <tr>
               <td><?php echo $id; ?></td>
               <td><?php echo h($name); ?></td>
               <td>
-                <?php if ($archived): ?>
-                  <span class="badge off">Archived</span>
-                <?php elseif ($active): ?>
+                <?php if ($active): ?>
                   <span class="badge">Active</span>
                 <?php else: ?>
                   <span class="badge off">Disabled</span>
@@ -584,12 +652,28 @@ try {
                     <button class="ghost" type="submit"><?php echo $active ? 'Отключить' : 'Включить'; ?></button>
                   </form>
 
-                  <form method="post" style="margin:0;" onsubmit="return confirm('Архивировать ученика?');">
-                    <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
-                    <input type="hidden" name="action" value="archive_student" />
-                    <input type="hidden" name="id" value="<?php echo $id; ?>" />
-                    <button class="danger" type="submit">Архивировать</button>
-                  </form>
+                  <?php if ($deletePendingId === $id && $deletePendingToken !== ''): ?>
+                    <div class="muted" style="width:100%;">Удалить ученика «<?php echo h($deletePendingName !== '' ? $deletePendingName : $name); ?>»? Его код доступа и статистика будут безвозвратно удалены.</div>
+                    <form method="post" style="margin:0;">
+                      <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+                      <input type="hidden" name="action" value="delete_student_confirm" />
+                      <input type="hidden" name="id" value="<?php echo $id; ?>" />
+                      <input type="hidden" name="token" value="<?php echo h($deletePendingToken); ?>" />
+                      <button class="danger" type="submit">Да, удалить</button>
+                    </form>
+                    <form method="post" style="margin:0;">
+                      <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+                      <input type="hidden" name="action" value="delete_student_cancel" />
+                      <button class="ghost" type="submit">Отмена</button>
+                    </form>
+                  <?php else: ?>
+                    <form method="post" style="margin:0;">
+                      <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+                      <input type="hidden" name="action" value="delete_student_prepare" />
+                      <input type="hidden" name="id" value="<?php echo $id; ?>" />
+                      <button class="danger" type="submit">Удалить</button>
+                    </form>
+                  <?php endif; ?>
                 </div>
               </td>
             </tr>
@@ -600,5 +684,17 @@ try {
 
     <?php endif; ?>
   </div>
+
+  <?php if ($flash !== ''): ?>
+    <script>
+      // Auto-hide flash messages to avoid a permanently visible “saved” label.
+      setTimeout(function () {
+        try {
+          var el = document.querySelector('.flash');
+          if (el) el.style.display = 'none';
+        } catch (e) {}
+      }, 4500);
+    </script>
+  <?php endif; ?>
 </body>
 </html>

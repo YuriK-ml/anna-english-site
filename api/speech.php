@@ -277,6 +277,14 @@ try {
   }
 } catch (Throwable $e) {}
 
+// Best-effort demo stats logging (must not block Tutor).
+if ($isDemo) {
+  try {
+    $pdo = tutor_pdo();
+    tutor_usage_log_demo_success($pdo, 'demo_tts', ['model' => $model, 'voice' => $voice]);
+  } catch (Throwable $e) {}
+}
+
 // Demo quota: count only successful speech generations.
 if ($isDemo) {
   $ttsRemaining = isset($_SESSION['tutor_demo_tts_remaining']) ? (int)$_SESSION['tutor_demo_tts_remaining'] : 0;

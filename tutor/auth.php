@@ -58,7 +58,8 @@ try {
   respond(500, ['error' => ['code' => 'server_error', 'message' => 'Server error.']]);
 }
 
-if (!$row || (int)$row['archived'] === 1 || (int)$row['active'] !== 1) {
+// Archived status is deprecated; access is controlled only by `active`.
+if (!$row || (int)$row['active'] !== 1) {
   respond(401, ['error' => ['code' => 'invalid_code', 'message' => 'Неверный код доступа.']]);
 }
 
