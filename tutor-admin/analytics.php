@@ -18,6 +18,23 @@ function require_admin(): void {
   }
 }
 
+function csrf_token(): string {
+  if (!isset($_SESSION['tutor_csrf']) || !is_string($_SESSION['tutor_csrf']) || strlen($_SESSION['tutor_csrf']) < 16) {
+    $_SESSION['tutor_csrf'] = bin2hex(random_bytes(16));
+  }
+  return $_SESSION['tutor_csrf'];
+}
+
+function csrf_check_or_403(): void {
+  $t = (string)($_POST['csrf'] ?? '');
+  $s = (string)($_SESSION['tutor_csrf'] ?? '');
+  if ($t === '' || $s === '' || !hash_equals($s, $t)) {
+    http_response_code(403);
+    echo 'Forbidden';
+    exit;
+  }
+}
+
 function ana_private_dir(): string {
   $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
   if ($docRoot !== '') {
@@ -130,6 +147,62 @@ function article_title(string $path): string {
 
 require_admin();
 
+$flash = '';
+$flashType = 'info';
+if (isset($_SESSION['site_analytics_flash']) && is_string($_SESSION['site_analytics_flash'])) {
+  $flash = (string)$_SESSION['site_analytics_flash'];
+}
+unset($_SESSION['site_analytics_flash']);
+if (isset($_SESSION['site_analytics_flash_type']) && is_string($_SESSION['site_analytics_flash_type'])) {
+  $flashType = (string)$_SESSION['site_analytics_flash_type'];
+}
+unset($_SESSION['site_analytics_flash_type']);
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+  csrf_check_or_403();
+
+  $action = (string)($_POST['action'] ?? '');
+
+  $pdoForWrite = ana_pdo_or_null();
+  if (!$pdoForWrite) {
+    $_SESSION['site_analytics_flash'] = 'Данных пока нет или база аналитики недоступна.';
+    $_SESSION['site_analytics_flash_type'] = 'error';
+    header('Location: ' . (string)($_SERVER['REQUEST_URI'] ?? '/tutor-admin/analytics.php'));
+    exit;
+  }
+
+  try {
+    if ($action === 'purge_30' || $action === 'purge_7') {
+      $days = $action === 'purge_30' ? 30 : 7;
+      $cut = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('-' . $days . ' days');
+      $st = $pdoForWrite->prepare('DELETE FROM page_events WHERE created_at < ?');
+      $st->execute([$cut->format('c')]);
+      $deleted = $st->rowCount();
+
+      $_SESSION['site_analytics_flash'] = $deleted > 0
+        ? ('Удалено событий старше ' . $days . ' дней: ' . (int)$deleted)
+        : ('Удалять нечего: нет событий старше ' . $days . ' дней.');
+      $_SESSION['site_analytics_flash_type'] = $deleted > 0 ? 'ok' : 'info';
+    } elseif ($action === 'purge_all') {
+      $deleted = (int)$pdoForWrite->exec('DELETE FROM page_events');
+      $_SESSION['site_analytics_flash'] = $deleted > 0
+        ? ('Удалено событий: ' . (int)$deleted)
+        : 'Удалять нечего: таблица пустая.';
+      $_SESSION['site_analytics_flash_type'] = $deleted > 0 ? 'ok' : 'info';
+    } else {
+      $_SESSION['site_analytics_flash'] = 'Неизвестное действие.';
+      $_SESSION['site_analytics_flash_type'] = 'error';
+    }
+  } catch (Throwable $e) {
+    error_log('Site analytics purge failed: ' . $e->getMessage());
+    $_SESSION['site_analytics_flash'] = 'Не удалось выполнить очистку статистики.';
+    $_SESSION['site_analytics_flash_type'] = 'error';
+  }
+
+  header('Location: ' . (string)($_SERVER['REQUEST_URI'] ?? '/tutor-admin/analytics.php'));
+  exit;
+}
+
 $period = (string)($_GET['period'] ?? '1');
 if ($period !== '1' && $period !== '7' && $period !== '30') $period = '1';
 
@@ -196,6 +269,22 @@ if ($articlesDir && is_dir($articlesDir)) {
     th{font-size:12px;color:rgba(255,255,255,0.70);font-weight:800;text-transform:uppercase;letter-spacing:0.04em}
     td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
     .indent{padding-left:18px}
+
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,0.14);border-radius:999px;padding:8px 12px;background:rgba(0,0,0,0.25);color:#fff;cursor:pointer;font:inherit}
+    .btn:hover{background:rgba(0,0,0,0.35)}
+    .btn:active{transform:translateY(1px)}
+    .btn--danger{border-color:rgba(255,90,90,0.35);background:rgba(255,90,90,0.10)}
+    .btn--danger:hover{background:rgba(255,90,90,0.16)}
+    .mgmt h2{margin:0 0 10px; font-size:16px;}
+    .mgmt h3{margin:14px 0 8px; font-size:14px;}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .status{font-weight:800}
+    .status--on{color:#a6f3c1}
+    .status--off{color:#ffb3b3}
+    .flash{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.14)}
+    .flash.ok{background:rgba(66,185,131,0.12);border-color:rgba(66,185,131,0.25)}
+    .flash.error{background:rgba(255,90,90,0.10);border-color:rgba(255,90,90,0.25)}
+    .flash.info{background:rgba(255,255,255,0.06)}
   </style>
 </head>
 <body>
@@ -210,6 +299,112 @@ if ($articlesDir && is_dir($articlesDir)) {
         <a href="/tutor-admin/">← В админку</a>
       </div>
     </div>
+
+    <div class="card mgmt">
+      <h2>Управление статистикой</h2>
+
+      <h3>Учёт моих посещений</h3>
+      <div class="row">
+        <div>
+          Статус: <span id="anaSelfStatus" class="status">—</span>
+        </div>
+        <button id="anaSelfToggle" type="button" class="btn">…</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">Настройка действует только в этом браузере. На других устройствах её нужно установить отдельно.</div>
+
+      <h3>Очистка статистики</h3>
+      <div class="row" style="align-items:flex-start;">
+        <form method="post" style="margin:0;">
+          <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+          <input type="hidden" name="action" value="purge_30" />
+          <button class="btn" type="submit" onclick="return confirm('Удалить всю статистику старше 30 дней? Более свежие записи сохранятся.');">Удалить старше 30 дней</button>
+        </form>
+        <form method="post" style="margin:0;">
+          <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+          <input type="hidden" name="action" value="purge_7" />
+          <button class="btn" type="submit" onclick="return confirm('Удалить всю статистику старше 7 дней? Более свежие записи сохранятся.');">Удалить старше 7 дней</button>
+        </form>
+        <form method="post" style="margin:0;">
+          <input type="hidden" name="csrf" value="<?php echo h(csrf_token()); ?>" />
+          <input type="hidden" name="action" value="purge_all" />
+          <button class="btn btn--danger" type="submit" onclick="return confirm('Удалить ВСЮ накопленную статистику сайта? Это действие нельзя отменить.');">Удалить всю статистику</button>
+        </form>
+      </div>
+
+      <?php if ($flash !== ''): ?>
+        <div class="flash <?php echo h($flashType); ?>"><?php echo h($flash); ?></div>
+      <?php endif; ?>
+    </div>
+
+    <script>
+      (function(){
+        'use strict';
+        var LS = {
+          consent: 'anna_analytics_consent',
+          optout: 'anna_analytics_optout',
+          id: 'anna_analytics_id'
+        };
+
+        function getConsent(){
+          try { return String(localStorage.getItem(LS.consent) || ''); } catch(e){ return ''; }
+        }
+        function isOptOut(){
+          try { return String(localStorage.getItem(LS.optout) || '') === '1'; } catch(e){ return false; }
+        }
+
+        function setOff(){
+          try {
+            localStorage.setItem(LS.optout, '1');
+            localStorage.setItem(LS.consent, 'deny');
+            localStorage.removeItem(LS.id);
+          } catch(e) {}
+        }
+
+        function setOn(){
+          // Admin explicitly enables analytics in this browser.
+          try {
+            localStorage.removeItem(LS.optout);
+            localStorage.setItem(LS.consent, 'allow');
+            // Keep existing browser id if present; analytics.js will create one on the next public page view if missing.
+          } catch(e) {}
+        }
+
+        function isEnabled(){
+          return !isOptOut() && getConsent() === 'allow';
+        }
+
+        function render(){
+          var st = document.getElementById('anaSelfStatus');
+          var btn = document.getElementById('anaSelfToggle');
+          if (!st || !btn) return;
+
+          var on = isEnabled();
+          if (on) {
+            st.textContent = 'включён';
+            st.className = 'status status--on';
+            btn.textContent = 'Отключить учёт';
+          } else {
+            st.textContent = 'отключён';
+            st.className = 'status status--off';
+            btn.textContent = 'Включить учёт';
+          }
+        }
+
+        var btn = document.getElementById('anaSelfToggle');
+        if (btn) {
+          btn.addEventListener('click', function(){
+            if (isEnabled()) {
+              setOff();
+            } else {
+              setOn();
+            }
+            render();
+          });
+        }
+
+        render();
+      })();
+    </script>
 
     <div class="card">
       <div class="tabs">
@@ -298,3 +493,4 @@ if ($articlesDir && is_dir($articlesDir)) {
   </div>
 </body>
 </html>
+

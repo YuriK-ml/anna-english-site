@@ -76,6 +76,13 @@
     if (p === '/articles') return '/articles/';
     if (p === '/tutor') return '/tutor/';
 
+
+    // Normalize article URLs that may come without .html or with a trailing slash (server rewrites)
+    var m1 = p.match(/^\/articles\/([a-z0-9-]+)\.html\/$/i);
+    if (m1) p = '/articles/' + m1[1] + '.html';
+
+    var m2 = p.match(/^\/articles\/([a-z0-9-]+)\/?$/i);
+    if (m2) p = '/articles/' + m2[1] + '.html';
     // Allowlist
     if (p === '/' || p === '/teacher.html' || p === '/ai.html' || p === '/articles/' || p === '/tutor/') return p;
 
@@ -312,4 +319,6 @@
     boot();
   }
 })();
+
+
 

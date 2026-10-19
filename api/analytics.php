@@ -182,20 +182,37 @@ function ana_normalize_page(string $page): ?string {
 
   if (preg_match('/^\/articles\/[a-z0-9-]+\.html$/i', $page)) {
     // Accept only existing article files to avoid arbitrary path spam.
+    // Some hosts may have unexpected DOCUMENT_ROOT; use a safe fallback.
+    $isOk = false;
+
+    // 1) Primary: check under DOCUMENT_ROOT
     $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
     if ($docRoot !== '') {
       $candidate = $docRoot . $page;
-      $real = realpath($candidate);
-      $articlesDir = realpath($docRoot . '/articles');
-      if ($real && $articlesDir && str_starts_with($real, $articlesDir . DIRECTORY_SEPARATOR) && str_ends_with($real, '.html')) {
-        return $page;
+      $realFile = realpath($candidate);
+      $realArticles = realpath($docRoot . '/articles');
+      if ($realFile && $realArticles && str_starts_with($realFile, $realArticles . DIRECTORY_SEPARATOR) && str_ends_with($realFile, '.html')) {
+        $isOk = true;
       }
     }
+
+    // 2) Fallback: resolve relative to repo structure (works even if DOCUMENT_ROOT is unexpected)
+    if (!$isOk) {
+      $articlesDir = realpath(__DIR__ . '/../articles');
+      if ($articlesDir) {
+        $fileName = basename($page);
+        $realFile = realpath($articlesDir . DIRECTORY_SEPARATOR . $fileName);
+        if ($realFile && str_starts_with($realFile, $articlesDir . DIRECTORY_SEPARATOR) && str_ends_with($realFile, '.html')) {
+          $isOk = true;
+        }
+      }
+    }
+
+    return $isOk ? $page : null;
   }
 
   return null;
 }
-
 function ana_allowed_targets(): array {
   return [
     'tg_channel' => 'Telegram канал',
