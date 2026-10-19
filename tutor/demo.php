@@ -27,6 +27,17 @@ if ($studentId > 0) {
 $active = isset($_SESSION['tutor_demo_active']) && $_SESSION['tutor_demo_active'] === 1;
 if ($active) {
   $remaining = isset($_SESSION['tutor_demo_remaining']) ? (int)$_SESSION['tutor_demo_remaining'] : 0;
+  // Stage 6.2C already started the demo before STT/TTS were enabled for demo.
+  // Initialize additional counters lazily, but never reset them once present.
+  if (!isset($_SESSION['tutor_demo_stt_remaining'])) {
+    $_SESSION['tutor_demo_stt_remaining'] = 5;
+  }
+  if (!isset($_SESSION['tutor_demo_tts_remaining'])) {
+    $_SESSION['tutor_demo_tts_remaining'] = 5;
+  }
+
+  $sttRemaining = (int)($_SESSION['tutor_demo_stt_remaining'] ?? 0);
+  $ttsRemaining = (int)($_SESSION['tutor_demo_tts_remaining'] ?? 0);
   $demoId = isset($_SESSION['tutor_demo_id']) && is_string($_SESSION['tutor_demo_id']) ? (string)$_SESSION['tutor_demo_id'] : '';
 
   tutor_json_respond(200, [
@@ -35,6 +46,8 @@ if ($active) {
     'started' => false,
     'demoId' => $demoId,
     'remaining' => max(0, $remaining),
+    'sttRemaining' => max(0, $sttRemaining),
+    'ttsRemaining' => max(0, $ttsRemaining),
   ]);
 }
 
@@ -43,6 +56,8 @@ try { session_regenerate_id(true); } catch (Throwable $e) {}
 
 $_SESSION['tutor_demo_active'] = 1;
 $_SESSION['tutor_demo_remaining'] = 5;
+$_SESSION['tutor_demo_stt_remaining'] = 5;
+$_SESSION['tutor_demo_tts_remaining'] = 5;
 $_SESSION['tutor_demo_started_at'] = gmdate('c');
 $_SESSION['tutor_demo_id'] = bin2hex(random_bytes(8));
 
@@ -58,4 +73,6 @@ tutor_json_respond(200, [
   'started' => true,
   'demoId' => (string)$_SESSION['tutor_demo_id'],
   'remaining' => 5,
+  'sttRemaining' => 5,
+  'ttsRemaining' => 5,
 ]);

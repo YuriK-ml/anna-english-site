@@ -217,7 +217,7 @@ body{
 
 .tutor-chatbar{
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto;
   gap: 12px;
   align-items: center;
   margin-bottom: 14px;
@@ -240,9 +240,17 @@ body{
   margin-top: 4px;
 }
 
+.tutor-chatbar__actions{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-self: end;
+  flex-wrap: wrap;
+}
+
 
 .tutor-chatbar__tts{
-  justify-self: end;
+  flex: 0 0 auto;
 }
 
 .tutor-chatbar__tts .tutor-toggle__btn{
@@ -714,13 +722,11 @@ body{
     grid-template-columns: auto 1fr;
     grid-template-areas:
       "back meta"
-      "rate rate"
-      "restart restart";
+      "actions actions";
   }
   #backBtn{ grid-area: back; }
   .tutor-chatbar__meta{ grid-area: meta; }
-  .tutor-chatbar__tts{ grid-area: rate; justify-self: end; }
-  #restartBtn{ grid-area: restart; width: 100%; }
+  .tutor-chatbar__actions{ grid-area: actions; justify-self: stretch; justify-content: flex-end; }
 }
 
 

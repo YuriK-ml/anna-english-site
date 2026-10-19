@@ -19,7 +19,37 @@ header('X-Content-Type-Options: nosniff');
 
 require_once __DIR__ . '/_guard.php';
 
-tutor_access_gate();
+tutor_session_start();
+
+$studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+$isDemo = ($studentId <= 0) && (isset($_SESSION['tutor_demo_active']) && $_SESSION['tutor_demo_active'] === 1);
+
+// Access gate: allow authorized students, and also demo users with a fixed quota.
+if ($studentId > 0) {
+  tutor_access_gate();
+} elseif ($isDemo) {
+  if (!isset($_SESSION['tutor_demo_tts_remaining'])) {
+    // Stage 6.2C started demo before TTS quota existed.
+    $_SESSION['tutor_demo_tts_remaining'] = 5;
+  }
+  $ttsRemaining = (int)($_SESSION['tutor_demo_tts_remaining'] ?? 0);
+  if ($ttsRemaining <= 0) {
+    respond_json(403, [
+      'error' => [
+        'code' => 'demo_limit',
+        'message' => 'Бесплатный лимит озвучивания исчерпан. Введите код доступа, чтобы продолжить.',
+      ],
+    ]);
+  }
+} else {
+  respond_json(401, [
+    'error' => [
+      'code' => 'auth_required',
+      'message' => 'Введите код доступа, чтобы пользоваться озвучиванием.',
+    ],
+  ]);
+}
+
 tutor_rate_limit_or_429('tts', 12, 60, 1500);
 
 function respond_json(int $status, array $payload): void {
@@ -246,6 +276,14 @@ try {
     tutor_usage_log_success($pdo, $studentId, 'tts');
   }
 } catch (Throwable $e) {}
+
+// Demo quota: count only successful speech generations.
+if ($isDemo) {
+  $ttsRemaining = isset($_SESSION['tutor_demo_tts_remaining']) ? (int)$_SESSION['tutor_demo_tts_remaining'] : 0;
+  if ($ttsRemaining > 0) {
+    $_SESSION['tutor_demo_tts_remaining'] = $ttsRemaining - 1;
+  }
+}
 
 // Return MP3 bytes (do not wrap in JSON).
 while (ob_get_level() > 0) {

@@ -20,7 +20,37 @@ header('X-Content-Type-Options: nosniff');
 
 require_once __DIR__ . '/_guard.php';
 
-tutor_access_gate();
+tutor_session_start();
+
+$studentId = isset($_SESSION['tutor_student_id']) ? (int)$_SESSION['tutor_student_id'] : 0;
+$isDemo = ($studentId <= 0) && (isset($_SESSION['tutor_demo_active']) && $_SESSION['tutor_demo_active'] === 1);
+
+// Access gate: allow authorized students, and also demo users with a fixed quota.
+if ($studentId > 0) {
+  tutor_access_gate();
+} elseif ($isDemo) {
+  if (!isset($_SESSION['tutor_demo_stt_remaining'])) {
+    // Stage 6.2C started demo before STT quota existed.
+    $_SESSION['tutor_demo_stt_remaining'] = 5;
+  }
+  $sttRemaining = (int)($_SESSION['tutor_demo_stt_remaining'] ?? 0);
+  if ($sttRemaining <= 0) {
+    respond(403, [
+      'error' => [
+        'code' => 'demo_limit',
+        'message' => 'Бесплатный лимит голосового ввода исчерпан. Введите код доступа, чтобы продолжить.',
+      ],
+    ]);
+  }
+} else {
+  respond(401, [
+    'error' => [
+      'code' => 'auth_required',
+      'message' => 'Введите код доступа, чтобы пользоваться голосовым вводом.',
+    ],
+  ]);
+}
+
 tutor_rate_limit_or_429('stt', 12, 60, 1500);
 
 function respond(int $status, array $payload): void {
@@ -258,6 +288,14 @@ try {
     tutor_usage_log_success($pdo, $studentId, 'stt');
   }
 } catch (Throwable $e) {}
+
+// Demo quota: count only successful transcriptions.
+if ($isDemo) {
+  $sttRemaining = isset($_SESSION['tutor_demo_stt_remaining']) ? (int)$_SESSION['tutor_demo_stt_remaining'] : 0;
+  if ($sttRemaining > 0) {
+    $_SESSION['tutor_demo_stt_remaining'] = $sttRemaining - 1;
+  }
+}
 
 respond(200, [
   'text' => trim($data['text']),
