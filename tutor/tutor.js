@@ -112,12 +112,12 @@
     },
     {
       id: "gaming",
-      emoji: "🎮",
-      title: "Gaming",
-      subtitle: "Компьютерные игры",
-      cardTitle: "Gaming — Компьютерные игры",
-      desc: "Играй, обсуждай стратегии и изучай английский",
-      starter: "Hi! What game would you like to play or talk about today?",
+      emoji: "🔤",
+      title: "Угадай слово",
+      subtitle: "Wordle",
+      cardTitle: "Угадай слово — Wordle",
+      desc: "Разгадывай английские слова и расширяй словарный запас",
+      starter: "Hi! Let's play Wordle in English. Send me your guesses or a screenshot of the board.",
     },
 
   ];
@@ -256,6 +256,29 @@ function applyStandaloneMode() {
       return "tutor_demo_" + state.access.demoId + "_history_" + topicId + "_" + level;
     }
     return "tutor_history_" + topicId + "_" + level;
+  }
+
+  function wordleStateKey(topicId, level) {
+    if (state && state.access && state.access.mode === "demo" && state.access.demoId) {
+      return "tutor_demo_" + state.access.demoId + "_wordle_state_" + topicId + "_" + level;
+    }
+    return "tutor_wordle_state_" + topicId + "_" + level;
+  }
+
+  function loadWordleState(topicId, level) {
+    if (topicId !== "gaming") return "";
+    var value = localStorage.getItem(wordleStateKey(topicId, level));
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function saveWordleState(topicId, level, value) {
+    if (topicId !== "gaming") return;
+    value = typeof value === "string" ? value.trim() : "";
+    if (value) localStorage.setItem(wordleStateKey(topicId, level), value);
+  }
+
+  function clearWordleState(topicId, level) {
+    if (topicId === "gaming") localStorage.removeItem(wordleStateKey(topicId, level));
   }
 
   function normalizeLocalHistoryItem(m) {
@@ -1558,6 +1581,66 @@ function applyStandaloneMode() {
     $("chatLevel").textContent = state.level;
   }
 
+  function formatWordleStatus(value) {
+    var fields = { pattern: "", present: "", excluded: "" };
+    String(value || "").split(/\r?\n/).forEach(function (line) {
+      var eq = line.indexOf("=");
+      if (eq <= 0) return;
+      var key = line.slice(0, eq).trim();
+      if (Object.prototype.hasOwnProperty.call(fields, key)) fields[key] = line.slice(eq + 1).trim();
+    });
+
+    var present = "—";
+    if (fields.present) {
+      var presentByLetter = {};
+      var presentOrder = [];
+      fields.present.split(",").forEach(function (token) {
+        var parts = token.split("!");
+        var letter = parts.shift() || "";
+        if (!letter) return;
+        if (!presentByLetter[letter]) {
+          presentByLetter[letter] = [];
+          presentOrder.push(letter);
+        }
+        parts.forEach(function (position) {
+          if (position && presentByLetter[letter].indexOf(position) === -1) {
+            presentByLetter[letter].push(position);
+          }
+        });
+      });
+      present = presentOrder.map(function (letter) {
+        var positions = presentByLetter[letter];
+        if (!positions.length) return letter;
+        return letter + " (not " + (positions.length === 1 ? "position " : "positions ") + positions.join(", ") + ")";
+      }).join(", ");
+    }
+
+    return "Pattern: " + (fields.pattern || "_____") +
+      "\nPresent: " + present +
+      "\nExcluded: " + (fields.excluded ? fields.excluded.split(",").join(", ") : "—");
+  }
+
+  function appendWordleStatus(wrap) {
+    if (!state || state.topicId !== "gaming") return;
+    var value = loadWordleState(state.topicId, getSelectedLevel());
+    if (!value) return;
+
+    var item = document.createElement("div");
+    item.className = "tutor-msg tutor-msg--ai";
+    var head = document.createElement("div");
+    head.className = "tutor-msg__head";
+    var role = document.createElement("div");
+    role.className = "tutor-msg__role";
+    role.textContent = "Wordle status";
+    head.appendChild(role);
+    var text = document.createElement("div");
+    text.className = "tutor-msg__text";
+    text.textContent = formatWordleStatus(value);
+    item.appendChild(head);
+    item.appendChild(text);
+    wrap.appendChild(item);
+  }
+
   function renderMessages(messages) {
     var wrap = $("chatMessages");
     wrap.innerHTML = "";
@@ -1611,6 +1694,8 @@ function applyStandaloneMode() {
       item.appendChild(text);
       wrap.appendChild(item);
     });
+
+    appendWordleStatus(wrap);
 
     wrap.scrollTop = wrap.scrollHeight;
     syncTtsButtons();
@@ -1889,6 +1974,7 @@ function applyStandaloneMode() {
       strictness: getStrictness(),
       history: toApiHistory(baseMessages.concat([{ role: "user", text: sendText, ts: Date.now() }])),
       imageDataUrl: hasImage ? state.compose.imageDataUrl : null,
+      wordleState: state.topicId === "gaming" ? loadWordleState(state.topicId, level) : undefined,
     };
 
     callTutorApi(payload)
@@ -1914,6 +2000,9 @@ function applyStandaloneMode() {
 
         var reply = typeof res.data.reply === "string" ? res.data.reply.trim() : "";
         var analysis = res.data.analysis || null;
+        if (state.topicId === "gaming") {
+          saveWordleState(state.topicId, level, res.data.wordleState);
+        }
 
         var next = baseMessages.slice();
         next.push({ role: "user", text: sendText, ts: Date.now() });
@@ -1970,6 +2059,7 @@ function applyStandaloneMode() {
 
     var level = getSelectedLevel();
     var fresh = ensureStarter(topic, []);
+    clearWordleState(state.topicId, level);
     saveHistory(state.topicId, level, fresh);
     renderMessages(fresh);
     renderAnalysisEmpty();

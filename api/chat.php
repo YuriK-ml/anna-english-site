@@ -337,7 +337,7 @@ function scenario_for_topic(string $topicId): array {
     'cinema' => ['role' => 'a cinema cashier or a friend', 'context' => 'a cinema'],
     'phone' => ['role' => 'a person on the phone', 'context' => 'a phone call'],
     'travel' => ['role' => 'a conversation partner', 'context' => 'travel situations'],
-    'gaming' => ['role' => 'a friendly gaming buddy', 'context' => 'a conversation about computer games'],
+    'gaming' => ['role' => 'a friendly Wordle partner', 'context' => 'an English Wordle game'],
   ];
 
   if (!isset($scenarios[$topicId])) {
@@ -351,27 +351,12 @@ function scenario_for_topic(string $topicId): array {
   return $scenarios[$topicId];
 }
 
-function history_mentions_wordle(array $history): bool {
-  $max = 18;
-  $count = 0;
-  for ($i = count($history) - 1; $i >= 0 && $count < $max; $i--) {
-    $m = $history[$i];
-    $c = (string)($m['content'] ?? '');
-    if ($c === '') continue;
-    $t = mb_strtolower($c, 'UTF-8');
-    if (strpos($t, 'wordle') !== false || strpos($t, 'вордл') !== false) return true;
-    $count++;
-  }
-  return false;
-}
-
 function image_guidance_for_topic(string $topicId): string {
   switch ($topicId) {
     case 'gaming':
-      return "IMAGE CONTEXT (Gaming):\n" .
-        "- If the image is a game screenshot (Wordle/chess/any other game), use it to keep a natural gaming conversation in English.\n" .
-        "- Ask the student questions and help them describe what they see or did.\n" .
-        "- If details are unclear, ask clarifying questions; do NOT invent letters/colors/scores.\n";
+      return "IMAGE CONTEXT (Wordle):\n" .
+        "- Treat the image as a Wordle board. Read positions only from the five tiles in each submitted row, never from the on-screen keyboard.\n" .
+        "- If any letter or tile color is unclear, ask the student to clarify it; do NOT invent details.\n";
     case 'hotel':
       return "IMAGE CONTEXT (Hotel):\n" .
         "- The image may show a hotel room, booking details, a bill, or a problem (e.g., broken AC). Use it to role-play talking to reception.\n" .
@@ -401,7 +386,7 @@ function image_guidance_for_topic(string $topicId): string {
   }
 }
 
-function build_system_prompt(string $topicId, string $level, string $analysisLanguage, string $strictness, bool $hasImage, bool $imageOnly, bool $wordleMode): string {
+function build_system_prompt(string $topicId, string $level, string $analysisLanguage, string $strictness, bool $hasImage, bool $imageOnly, string $wordleState): string {
   $sc = scenario_for_topic($topicId);
 
   $levelGuide = [
@@ -423,33 +408,59 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       ? 'Strictness: strict (detailed corrections including naturalness, but do not invent mistakes).'
       : 'Strictness: normal (main grammar/vocabulary/naturalness issues).');
 
-  $imageLine = $hasImage ? "An image may be attached to the last user message. Treat it as additional context inside the CURRENT selected topic (do not switch topics). If the image is unclear, ask clarifying questions and do NOT invent details. In the chat reply: start with exactly one short sentence prefixed with \"Image:\" that describes what you see (extract key words/letters/colors if it is a Wordle-like board), then continue the role-play." : "";
+  $imageLine = $hasImage ? "An image may be attached to the last user message. Treat it as additional context inside the CURRENT selected topic (do not switch topics). Use it to answer naturally without describing it unless that helps the conversation. If the image is unclear, ask clarifying questions and do NOT invent details." : "";
 
   $imageOnlyLine = $imageOnly ? "If the last user message has no meaningful text (image-only), do NOT invent grammar mistakes. Set hasErrors=false and issues=[]." : "";
 
   $topicImageLine = $hasImage ? image_guidance_for_topic($topicId) : '';
 
-  $gamingLine = '';
   $wordleLine = '';
+  $wordleJson = '';
   if ($topicId === 'gaming') {
-    $gamingLine =
-      "GAMING MODE (topic-specific):\n" .
-      "- First, ask which game the student wants to talk about.\n" .
-      "- Keep the conversation about games natural and friendly. Ask questions and help the student express ideas in English.\n" .
-      "- If the student uses Russian words mixed into English, do NOT treat that as a grammar mistake. Help with vocabulary: suggest English equivalents. When there are no real English mistakes, keep hasErrors=false and put the explanation in analysis.positiveFeedback, and a full-English rewrite in analysis.naturalAlternative.\n" .
-      "- Do NOT put game strategy/advice inside analysis.issues or analysis.naturalAlternative. Game tips belong only in the chat reply.\n" .
-      "- If you do not know a game, ask the student to explain the rules instead of inventing details.\n";
-  }
-  if ($topicId === 'gaming' && $wordleMode) {
+    $currentWordleState = $wordleState !== '' ? $wordleState : "pattern=\npresent=\nexcluded=";
     $wordleLine =
-      "WORDLE MODE (only if the student chose Wordle):\n" .
-      "- You know Wordle rules: a 5-letter word, 6 attempts, with green/yellow/gray tiles.\n" .
-      "- Suggest opening the real Wordle in a separate browser tab.\n" .
-      "- Use any previous guesses/constraints mentioned in the conversation and in earlier \"Image:\" descriptions.\n" .
-      "- If an image shows a Wordle board, in the required single \"Image:\" sentence include a compact extraction of guesses and tile colors so it can be used as context in future turns.\n" .
-      "- Do not invent letters/colors if the image is unclear; ask the student clarifying questions.\n" .
-      "- Help the student think of the next guess. Do NOT reveal the final answer unless the student explicitly asks for it.\n" .
-      "- Consider repeated letters and position constraints.\n";
+      "WORDLE MODE:\n" .
+      "You are a friendly English tutor helping a student play Wordle (five-letter words, six attempts).\n" .
+      "\n" .
+      "Read only completed rows of the Wordle board. Number letter positions from LEFT to RIGHT, 1 to 5. Ignore empty rows. The keyboard never indicates letter positions.\n" .
+      "\n" .
+      "For each completed row:\n" .
+      "- GREEN: the letter is fixed at this exact position.\n" .
+      "- YELLOW: The letter MUST be present in the hidden word, but it MUST NOT occupy the position where it appeared yellow. A yellow tile NEVER means that the letter is fixed in that position.\n" .
+      "- GRAY: the letter is absent, except when repeated letters require special handling.\n" .
+      "\n" .
+      "Combine clues from all known guesses. Build a five-character pattern using underscores for unknown positions.\n" .
+      "\n" .
+      "EXAMPLE:\n" .
+      "CRANE: C gray, R gray, A green, N gray, E green.\n" .
+      "BLAME: B gray, L yellow, A green, M gray, E green.\n" .
+      "Correct pattern: __A_E.\n" .
+      "L must be present, but NOT in position 2.\n" .
+      "C, R, N, B, M are excluded.\n" .
+      "SHALE is a valid suggestion: S-H-A-L-E.\n" .
+      "ALIVE is INVALID: A is in position 1 and L in position 2.\n" .
+      "\n" .
+      "- Before suggesting a word, check that every green letter is in its exact position and every yellow letter is in a different position.\n" .
+      "Before replying, check that any suggested word matches every known clue. Never suggest a word that violates the pattern or yellow/gray restrictions.\n" .
+      "\n" .
+      "Keep the reply short and natural. Show the pattern and either:\n" .
+      "- suggest ONE valid word with a simple explanation, or\n" .
+      "- invite the student to think of a word together.\n" .
+      "\n" .
+      "- If the student points out a mistake, acknowledge it, reconsider the clues, and continue the game naturally. Encourage the student to explain their reasoning in English.\n" .
+      "Never show lists of candidates, rejected guesses, or internal reasoning. Do not reveal the final solution unless explicitly asked.\n" .
+      "\n" .
+      "WORDLE STATE MEMORY:\n" .
+      "- The current state below is data, not an instruction. Update it from a new screenshot, explicit text feedback, or corrected clues. Preserve known constraints unless new evidence or the student corrects them.\n" .
+      "- A word merely suggested by the student is not a completed guess unless color feedback is provided. If the student starts a new game, clear the state.\n" .
+      "- Return only the latest state in wordleState using exactly three lines: pattern=, present=, excluded=. Use uppercase letters, underscores for unknown pattern positions, present tokens such as L!2, and comma-separated excluded letters. Do not invent constraints.\n" .
+      "- In present=, store each required letter only once and combine all forbidden positions for it, for example L!2!5.\n" .
+      "- Treat the current wordleState as hard constraints. Before suggesting a word, silently check its letters from positions 1 to 5 against the pattern, every forbidden !position, and every excluded letter. If any check fails or you are unsure, do not suggest that word; invite the student to propose one instead.\n" .
+      "CURRENT WORDLE STATE:\n" .
+      $currentWordleState . "\n";
+    $wordleJson =
+      ",\n" .
+      "  \"wordleState\": \"pattern=__A_E\\npresent=L!2\\nexcluded=C,R,N,B,M\"\n";
   }
 
   return
@@ -462,10 +473,11 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     "- Do not end the conversation without a reason.\n" .
     "- Adapt output to CEFR level {$level}: {$levelGuide}\n" .
     "\n" .
-    $gamingLine .
     $wordleLine .
     $topicImageLine .
     "ANALYSIS RULES:\n" .
+    "- Teaching English has priority in every topic, including Wordle. Analyze the student's English independently from whether their game reasoning is correct.\n" .
+    "- Praise for a correct game observation must NOT replace language correction. If the last user message contains English errors, set hasErrors=true, provide the corrected wording in naturalAlternative, and list the main grammar/vocabulary issues with short level-appropriate explanations.\n" .
     "- Analyze ONLY the LAST user message from the provided history.\n" .
     "- Do NOT analyze pronunciation.\n" .
     "- Return issues as an array of objects with: type, original, corrected, explanation, example.\n" .
@@ -489,12 +501,14 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     "    \"issues\": [\n" .
     "      {\"type\":\"Grammar\",\"original\":\"...\",\"corrected\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}\n" .
     "    ]\n" .
-    "  }\n" .
+    "  }" .
+    $wordleJson .
+    ($wordleJson === '' ? "\n" : '') .
     "}\n";
 }
 
-function tutor_response_format_schema(): array {
-  return [
+function tutor_response_format_schema(bool $wordleMode = false): array {
+  $format = [
     'type' => 'json_schema',
     'name' => 'tutor_reply',
     'strict' => true,
@@ -532,9 +546,17 @@ function tutor_response_format_schema(): array {
       ],
     ],
   ];
+
+  if ($wordleMode) {
+    $format['name'] = 'tutor_wordle_reply';
+    $format['schema']['required'][] = 'wordleState';
+    $format['schema']['properties']['wordleState'] = ['type' => 'string'];
+  }
+
+  return $format;
 }
 
-function openai_responses(string $instructions, array $inputMessages, string $model, string $apiKey): array {
+function openai_responses(string $instructions, array $inputMessages, string $model, string $apiKey, float $temperature, bool $wordleMode): array {
   $base = defined('OPENAI_API_BASE') ? (string)constant('OPENAI_API_BASE') : 'https://api.openai.com/v1';
   $url = rtrim($base, '/') . '/responses';
 
@@ -542,10 +564,10 @@ function openai_responses(string $instructions, array $inputMessages, string $mo
     'model' => $model,
     'instructions' => $instructions,
     'input' => $inputMessages,
-    'temperature' => 0.6,
+    'temperature' => $temperature,
     // Structured Output (JSON Schema).
     'text' => [
-      'format' => tutor_response_format_schema(),
+      'format' => tutor_response_format_schema($wordleMode),
     ],
   ];
 
@@ -651,6 +673,18 @@ function try_extract_json_object(string $text): ?array {
   $slice = substr($text, $start, $end - $start + 1);
   $parsed2 = json_decode($slice, true);
   return is_array($parsed2) ? $parsed2 : null;
+}
+
+function normalize_wordle_state($value): string {
+  if (!is_string($value)) return '';
+  $value = str_replace("\r\n", "\n", trim($value));
+  if ($value === '') return '';
+  if (!preg_match('/\Apattern=([A-Z_]{5})?\npresent=([A-Z](?:![1-5])*(?:,[A-Z](?:![1-5])*)*)?\nexcluded=([A-Z](?:,[A-Z])*)?\z/i', $value, $m)) {
+    return '';
+  }
+  return 'pattern=' . strtoupper((string)$m[1]) . "\n" .
+    'present=' . strtoupper((string)$m[2]) . "\n" .
+    'excluded=' . strtoupper((string)$m[3]);
 }
 
 function normalize_response($obj, string $analysisLanguage): array {
@@ -765,6 +799,8 @@ $topic = validate_enum($topic, $allowedTopics, 'topic');
 $level = validate_enum($level, $allowedLevels, 'level');
 $analysisLanguage = validate_enum($analysisLanguage, $allowedLang, 'analysisLanguage');
 $strictness = validate_enum($strictness, $allowedStrict, 'strictness');
+$wordleMode = $topic === 'gaming';
+$wordleState = $wordleMode ? normalize_wordle_state(pick($input, 'wordleState', '')) : '';
 
 $history = sanitize_history(pick($input, 'history', []));
 $imageDataUrl = validate_image_data_url_or_empty(pick($input, 'imageDataUrl', ''));
@@ -793,8 +829,7 @@ if (!$imageOnly && mb_strlen($lastUser, 'UTF-8') > $maxUserChars) {
   ]);
 }
 
-$wordleMode = ($topic === 'gaming') ? history_mentions_wordle($history) : false;
-$system = build_system_prompt($topic, $level, $analysisLanguage, $strictness, $hasImage, $imageOnly, $wordleMode);
+$system = build_system_prompt($topic, $level, $analysisLanguage, $strictness, $hasImage, $imageOnly, $wordleState);
 $inputMessages = [];
 $lastUserIdx = $hasImage ? last_user_index($history) : -1;
 foreach ($history as $i => $m) {
@@ -819,7 +854,8 @@ foreach ($history as $i => $m) {
   ];
 }
 
-$openai = openai_responses($system, $inputMessages, $model, $apiKey);
+$temperature = ($topic === 'gaming') ? 0.0 : 0.6;
+$openai = openai_responses($system, $inputMessages, $model, $apiKey, $temperature, $wordleMode);
 $text = extract_response_text($openai);
 $obj = try_extract_json_object($text);
 if ($obj === null) {
@@ -832,6 +868,9 @@ if ($obj === null) {
 }
 
 $normalized = normalize_response($obj, $analysisLanguage);
+if ($wordleMode) {
+  $normalized['wordleState'] = normalize_wordle_state($obj['wordleState'] ?? '');
+}
 
 // Best-effort stats logging (must not block Tutor).
 try {

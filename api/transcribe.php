@@ -242,6 +242,7 @@ $cfile = curl_file_create($tmp, $mime !== '' ? $mime : 'application/octet-stream
 $payload = [
   'model' => $model,
   'file' => $cfile,
+  'language' => 'en',
 ];
 
 $ch = curl_init($url);
