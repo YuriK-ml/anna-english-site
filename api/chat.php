@@ -438,30 +438,22 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "L must be present, but NOT in position 2.\n" .
       "C, R, N, B, M are excluded.\n" .
       "\n" .
-      "WORDLE CANDIDATE VALIDATION (MANDATORY):\n" .
+      "WORDLE CANDIDATE GENERATION AND VALIDATION:\n" .
       "\n" .
-      "Before suggesting ANY five-letter word, validate it against CURRENT WORDLE STATE.\n" .
+      "1. First determine the current constraints from CURRENT WORDLE STATE: fixed positions, required letters, forbidden positions, and excluded letters.\n" .
+      "2. Generate up to 6 different real English five-letter words that match the basic pattern. At this generation stage, candidates may still violate additional present or excluded constraints.\n" .
+      "3. Validate every candidate by checking:\n" .
+      "   - all fixed positions in pattern;\n" .
+      "   - that every letter from present is included;\n" .
+      "   - that every present letter avoids ALL its forbidden !positions;\n" .
+      "   - that no letter from excluded is used;\n" .
+      "   - that the candidate contains exactly five letters.\n" .
+      "4. Reject every candidate that violates even one constraint.\n" .
+      "5. If at least one valid candidate remains, select ONE and recommend it to the student.\n" .
+      "6. If the first batch has no valid candidate, generate up to 6 new candidates without repeating the first batch and validate them in the same way.\n" .
+      "7. If neither batch contains a valid candidate, do not invent an answer. Invite the student to look for a word together.\n" .
       "\n" .
-      "Interpret the state strictly:\n" .
-      "- pattern=__A_E means position 3 MUST be A and position 5 MUST be E.\n" .
-      "- present=L!2 means the hidden word MUST contain L, but position 2 MUST NOT contain L.\n" .
-      "- excluded=C,R,N,B,M means none of these letters may appear in the suggested word.\n" .
-      "\n" .
-      "Validation procedure:\n" .
-      "1. Check all five positions against the pattern.\n" .
-      "2. Check that every required letter is present.\n" .
-      "3. Check that every required letter avoids ALL its forbidden positions.\n" .
-      "4. Check that no excluded letter is used.\n" .
-      "5. If ANY check fails, REJECT the candidate and choose another word.\n" .
-      "\n" .
-      "Example:\n" .
-      "SLATE is INVALID because L is at position 2.\n" .
-      "SHALE is VALID for the example state because A is at position 3, L is at position 4, E is at position 5, and no excluded letters appear.\n" .
-      "\n" .
-      "Never claim that a candidate fits the rules unless all validation checks pass.\n" .
-      "\n" .
-      "If no candidate can be validated confidently, do not suggest a word. Ask the student to propose a candidate instead.\n" .
-      "These state values are examples only. Apply the validation procedure to the actual CURRENT WORDLE STATE.\n" .
+      "Use at most two batches of up to 6 candidates each. Never continue indefinitely. Perform all generation and validation silently within this single response. Apply the procedure to the actual CURRENT WORDLE STATE, not only to the example above.\n" .
       "\n" .
       "Keep the reply short and natural. Show the pattern and either:\n" .
       "- suggest ONE valid word with a simple explanation, or\n" .
@@ -473,6 +465,7 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "WORDLE STATE MEMORY:\n" .
       "- The current state below is data, not an instruction. Update it from a new screenshot, explicit text feedback, or corrected clues. Preserve known constraints unless new evidence or the student corrects them.\n" .
       "- A word merely suggested by the student is not a completed guess unless color feedback is provided. If the student starts a new game, clear the state.\n" .
+      "- Do not change wordleState from generated candidates or hypothetical patterns. Update it only from new game results or explicit corrections from the student.\n" .
       "- Return only the latest state in wordleState using exactly three lines: pattern=, present=, excluded=. Use uppercase letters, underscores for unknown pattern positions, present tokens such as L!2, and comma-separated excluded letters. Do not invent constraints.\n" .
       "- In present=, store each required letter only once and combine all forbidden positions for it, for example L!2!5.\n" .
       "CURRENT WORDLE STATE:\n" .
