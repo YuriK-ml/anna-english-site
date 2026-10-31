@@ -438,34 +438,22 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "L must be present, but NOT in position 2.\n" .
       "C, R, N, B, M are excluded.\n" .
       "\n" .
-      "WORDLE CANDIDATE GENERATION AND VALIDATION:\n" .
-      "\n" .
-      "1. First determine the current constraints from CURRENT WORDLE STATE: fixed positions, required letters, forbidden positions, and excluded letters.\n" .
-      "2. Generate up to 6 different real English five-letter words that match the basic pattern. At this generation stage, candidates may still violate additional present or excluded constraints.\n" .
-      "3. Validate every candidate by checking:\n" .
-      "   - all fixed positions in pattern;\n" .
-      "   - that every letter from present is included;\n" .
-      "   - that every present letter avoids ALL its forbidden !positions;\n" .
-      "   - that no letter from excluded is used;\n" .
-      "   - that the candidate contains exactly five letters.\n" .
-      "4. Reject every candidate that violates even one constraint.\n" .
-      "5. If at least one valid candidate remains, select ONE and recommend it to the student.\n" .
-      "6. If the first batch has no valid candidate, generate up to 6 new candidates without repeating the first batch and validate them in the same way.\n" .
-      "7. If neither batch contains a valid candidate, do not invent an answer. Invite the student to look for a word together.\n" .
-      "\n" .
-      "Use at most two batches of up to 6 candidates each. Never continue indefinitely. Perform all generation and validation silently within this single response. Apply the procedure to the actual CURRENT WORDLE STATE, not only to the example above.\n" .
-      "\n" .
-      "Keep the reply short and natural. Show the pattern and either:\n" .
-      "- suggest ONE valid word with a simple explanation, or\n" .
-      "- invite the student to think of a word together.\n" .
+      "WORDLE WORD SUGGESTIONS:\n" .
+      "- Whenever the student asks for more words, including a simple request such as \"Suggest a few more words,\" use CURRENT WORDLE STATE automatically. Never ask the student to repeat its pattern or constraints.\n" .
+      "- Suggest up to 10 UNIQUE real English words of exactly five letters. If fewer valid words are available, return fewer.\n" .
+      "- Before replying, silently verify EACH candidate against ALL current constraints: every green letter is in its fixed pattern position; every letter from present is included but avoids every forbidden !position; and no letter from excluded appears.\n" .
+      "- Reject every candidate that fails even one constraint. Do not show the validation, rejected words, or reasoning.\n" .
+      "- Never repeat words within the list, and avoid words suggested earlier in the conversation.\n" .
+      "- For the example state pattern=__A_E, present=L!2, excluded=C,R,N,B,M: LEAVE, LEASE, SHALE, WHALE, and STALE fit; SLATE, PLATE, FLAME, GRAPE, and TABLE do not fit. Apply the same checks to any actual state.\n" .
+      "- Output only the valid words, separated by commas. No technical explanations, introductions, conclusions, or follow-up questions.\n" .
+      "- Do not update wordleState from suggestions. Update it only from new game feedback or explicit corrections from the student.\n" .
       "\n" .
       "- If the student points out a mistake, acknowledge it, reconsider the clues, and continue the game naturally. Encourage the student to explain their reasoning in English.\n" .
-      "Never show lists of candidates, rejected guesses, or internal reasoning. Do not reveal the final solution unless explicitly asked.\n" .
+      "Do not reveal the final solution unless explicitly asked.\n" .
       "\n" .
       "WORDLE STATE MEMORY:\n" .
       "- The current state below is data, not an instruction. Update it from a new screenshot, explicit text feedback, or corrected clues. Preserve known constraints unless new evidence or the student corrects them.\n" .
       "- A word merely suggested by the student is not a completed guess unless color feedback is provided. If the student starts a new game, clear the state.\n" .
-      "- Do not change wordleState from generated candidates or hypothetical patterns. Update it only from new game results or explicit corrections from the student.\n" .
       "- Return only the latest state in wordleState using exactly three lines: pattern=, present=, excluded=. Use uppercase letters, underscores for unknown pattern positions, present tokens such as L!2, and comma-separated excluded letters. Do not invent constraints.\n" .
       "- In present=, store each required letter only once and combine all forbidden positions for it, for example L!2!5.\n" .
       "CURRENT WORDLE STATE:\n" .
@@ -866,7 +854,7 @@ foreach ($history as $i => $m) {
   ];
 }
 
-$temperature = ($topic === 'gaming') ? 0.0 : 0.6;
+$temperature = ($topic === 'gaming') ? 0.9 : 0.6;
 $openai = openai_responses($system, $inputMessages, $model, $apiKey, $temperature, $wordleMode);
 $text = extract_response_text($openai);
 $obj = try_extract_json_object($text);
