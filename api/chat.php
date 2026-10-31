@@ -437,11 +437,31 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "Correct pattern: __A_E.\n" .
       "L must be present, but NOT in position 2.\n" .
       "C, R, N, B, M are excluded.\n" .
-      "SHALE is a valid suggestion: S-H-A-L-E.\n" .
-      "ALIVE is INVALID: A is in position 1 and L in position 2.\n" .
       "\n" .
-      "- Before suggesting a word, check that every green letter is in its exact position and every yellow letter is in a different position.\n" .
-      "Before replying, check that any suggested word matches every known clue. Never suggest a word that violates the pattern or yellow/gray restrictions.\n" .
+      "WORDLE CANDIDATE VALIDATION (MANDATORY):\n" .
+      "\n" .
+      "Before suggesting ANY five-letter word, validate it against CURRENT WORDLE STATE.\n" .
+      "\n" .
+      "Interpret the state strictly:\n" .
+      "- pattern=__A_E means position 3 MUST be A and position 5 MUST be E.\n" .
+      "- present=L!2 means the hidden word MUST contain L, but position 2 MUST NOT contain L.\n" .
+      "- excluded=C,R,N,B,M means none of these letters may appear in the suggested word.\n" .
+      "\n" .
+      "Validation procedure:\n" .
+      "1. Check all five positions against the pattern.\n" .
+      "2. Check that every required letter is present.\n" .
+      "3. Check that every required letter avoids ALL its forbidden positions.\n" .
+      "4. Check that no excluded letter is used.\n" .
+      "5. If ANY check fails, REJECT the candidate and choose another word.\n" .
+      "\n" .
+      "Example:\n" .
+      "SLATE is INVALID because L is at position 2.\n" .
+      "SHALE is VALID for the example state because A is at position 3, L is at position 4, E is at position 5, and no excluded letters appear.\n" .
+      "\n" .
+      "Never claim that a candidate fits the rules unless all validation checks pass.\n" .
+      "\n" .
+      "If no candidate can be validated confidently, do not suggest a word. Ask the student to propose a candidate instead.\n" .
+      "These state values are examples only. Apply the validation procedure to the actual CURRENT WORDLE STATE.\n" .
       "\n" .
       "Keep the reply short and natural. Show the pattern and either:\n" .
       "- suggest ONE valid word with a simple explanation, or\n" .
@@ -455,7 +475,6 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "- A word merely suggested by the student is not a completed guess unless color feedback is provided. If the student starts a new game, clear the state.\n" .
       "- Return only the latest state in wordleState using exactly three lines: pattern=, present=, excluded=. Use uppercase letters, underscores for unknown pattern positions, present tokens such as L!2, and comma-separated excluded letters. Do not invent constraints.\n" .
       "- In present=, store each required letter only once and combine all forbidden positions for it, for example L!2!5.\n" .
-      "- Treat the current wordleState as hard constraints. Before suggesting a word, silently check its letters from positions 1 to 5 against the pattern, every forbidden !position, and every excluded letter. If any check fails or you are unsure, do not suggest that word; invite the student to propose one instead.\n" .
       "CURRENT WORDLE STATE:\n" .
       $currentWordleState . "\n";
     $wordleJson =
