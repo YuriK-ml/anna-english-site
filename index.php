@@ -197,6 +197,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
 }
 
 // --- Telegram ---
+// Program Selector notifications: accept only structured, validated events.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event'])) {
+    rl_main_or_429('program_selector', 6, 60, 1500);
+
+    $rejectProgramSelector = static function(): void {
+        http_response_code(400);
+        echo 'invalid_input';
+        exit;
+    };
+
+    $readProgramSelectorField = static function(string $key, bool $required = true) use ($rejectProgramSelector): string {
+        if (!isset($_POST[$key])) {
+            if ($required) $rejectProgramSelector();
+            return '';
+        }
+        if (!is_string($_POST[$key]) || preg_match('//u', $_POST[$key]) !== 1) {
+            $rejectProgramSelector();
+        }
+        return trim($_POST[$key]);
+    };
+
+    $textLength = static function(string $value): int {
+        if (function_exists('mb_strlen')) return mb_strlen($value, 'UTF-8');
+        $count = preg_match_all('/./us', $value, $matches);
+        return $count === false ? strlen($value) : $count;
+    };
+
+    $cleanSingleLine = static function(string $value) use ($rejectProgramSelector): string {
+        $clean = preg_replace('/[\p{Cc}\p{Cf}]+/u', ' ', $value);
+        if ($clean === null) $rejectProgramSelector();
+        $clean = preg_replace('/\s+/u', ' ', trim($clean));
+        if ($clean === null) $rejectProgramSelector();
+        return $clean;
+    };
+
+    $event = $readProgramSelectorField('event');
+    $events = [
+        'program_selector_50' => ['progress' => 50, 'title' => '🟡 Подбор программы — 50%'],
+        'program_selector_90' => ['progress' => 90, 'title' => '🟢 Подбор программы — 90%'],
+    ];
+    if (!isset($events[$event])) $rejectProgramSelector();
+
+    $sessionId = $readProgramSelectorField('session_id');
+    if (preg_match('/\A[A-Za-z0-9_-]{6,64}\z/', $sessionId) !== 1) $rejectProgramSelector();
+
+    $name = $readProgramSelectorField('name', false);
+    if ($name !== '' && (
+        $textLength($name) > 40 ||
+        preg_match('/\A\p{L}+(?:[\'’\-]\p{L}+)*\z/u', $name) !== 1
+    )) {
+        $rejectProgramSelector();
+    }
+
+    $age = $cleanSingleLine($readProgramSelectorField('age'));
+    if ($textLength($age) > 24 || preg_match(
+        '/\A(?:(?:[3-9]|[1-9][0-9])(?:\s*(?:лет|год|года))?|(?:[1-9]|1[01])\s*класс|взрослый|взрослая|не указан(?:о|а)?)\z/iu',
+        $age
+    ) !== 1) {
+        $rejectProgramSelector();
+    }
+
+    $level = $cleanSingleLine($readProgramSelectorField('level'));
+    $allowedLevels = [
+        'A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2',
+        'beginner', 'elementary', 'pre-intermediate', 'intermediate',
+        'upper-intermediate', 'advanced', 'не указан',
+    ];
+    $levelIsAllowed = preg_match('/\A[ABC][0-2]\z/i', $level) === 1 ||
+        in_array(strtolower($level), $allowedLevels, true);
+    if ($textLength($level) > 24 || !$levelIsAllowed) $rejectProgramSelector();
+
+    $goal = $cleanSingleLine($readProgramSelectorField('goal'));
+    $course = $cleanSingleLine($readProgramSelectorField('course'));
+    if ($goal === '' || $course === '' || $textLength($goal) > 160 || $textLength($course) > 120) {
+        $rejectProgramSelector();
+    }
+
+    $progressRaw = $readProgramSelectorField('progress');
+    if (preg_match('/\A(?:0|[1-9][0-9]?|100)(?:\.\d{1,2})?\z/', $progressRaw) !== 1) {
+        $rejectProgramSelector();
+    }
+    $progress = (float)$progressRaw;
+    if ($progress > 100 || $progress < $events[$event]['progress']) $rejectProgramSelector();
+
+    $safeName = $name !== '' ? $name : 'не указано';
+    $progressLabel = rtrim(rtrim(number_format($progress, 2, '.', ''), '0'), '.');
+    $msg = $events[$event]['title'] . "\n" .
+           "ID: {$sessionId}\n" .
+           "Имя: {$safeName}\n" .
+           "Возраст/класс: {$age}\n" .
+           "Уровень: {$level}\n" .
+           "Цель: {$goal}\n" .
+           "Курс: {$course}\n" .
+           "Прогресс: {$progressLabel}%";
+
+    try {
+        $token = $TELEGRAM_TOKEN;
+        $chat_ids = [1387433465, 8527953030];
+        foreach ($chat_ids as $chat_id) {
+            @file_get_contents("https://api.telegram.org/bot$token/sendMessage?" . http_build_query([
+                'chat_id' => $chat_id,
+                'text' => $msg,
+            ]));
+        }
+    } catch (Throwable $e) {
+        error_log('Program Selector Telegram notify failed: ' . $e->getMessage());
+    }
+
+    echo 'ok';
+    exit;
+}
+
 // Deprecated: message sending is done server-side in get_user handler.
 // Keep this endpoint for backward compatibility, but do not forward arbitrary messages.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
