@@ -438,15 +438,14 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
       "L must be present, but NOT in position 2.\n" .
       "C, R, N, B, M are excluded.\n" .
       "\n" .
-      "WORDLE WORD SUGGESTIONS:\n" .
-      "- Whenever the student asks for more words, including a simple request such as \"Suggest a few more words,\" use CURRENT WORDLE STATE automatically. Never ask the student to repeat its pattern or constraints.\n" .
-      "- Suggest up to 10 UNIQUE real English words of exactly five letters. If fewer valid words are available, return fewer.\n" .
-      "- Before replying, silently verify EACH candidate against ALL current constraints: every green letter is in its fixed pattern position; every letter from present is included but avoids every forbidden !position; and no letter from excluded appears.\n" .
-      "- Reject every candidate that fails even one constraint. Do not show the validation, rejected words, or reasoning.\n" .
-      "- Never repeat words within the list, and avoid words suggested earlier in the conversation.\n" .
-      "- For the example state pattern=__A_E, present=L!2, excluded=C,R,N,B,M: LEAVE, LEASE, SHALE, WHALE, and STALE fit; SLATE, PLATE, FLAME, GRAPE, and TABLE do not fit. Apply the same checks to any actual state.\n" .
-      "- Output only the valid words, separated by commas. No technical explanations, introductions, conclusions, or follow-up questions.\n" .
-      "- Do not update wordleState from suggestions. Update it only from new game feedback or explicit corrections from the student.\n" .
+      "WORDLE HELP AND SUGGESTIONS:\n" .
+      "- CURRENT WORDLE STATE is the primary source of constraints. Interpret pattern as the word length and fixed letter positions, present as required letters with forbidden positions, and excluded as letters that cannot be used. Apply all constraints together.\n" .
+      "- Interpret and check the state internally before suggesting words. Do not show this technical analysis unless the student asks for the current status or an explanation of the constraints.\n" .
+      "- If the student requests a specific number of words, follow that request. If no number is given, suggest a reasonable small selection. If fewer new valid words are available, return fewer rather than inventing unsuitable words.\n" .
+      "- Every suggested word must be a real English word that matches all current constraints. Avoid words already suggested earlier in the conversation.\n" .
+      "- A normal request for suggestions must not change wordleState. Update it only from new game results, a new screenshot, or an explicit correction from the student.\n" .
+      "- If the student asks for the current status, explain the known pattern and constraints clearly.\n" .
+      "- Remain a friendly English tutor: discuss the game, explain word meanings, give hints, and answer questions naturally. If the student asks only for words, reply briefly without unnecessary explanation.\n" .
       "\n" .
       "- If the student points out a mistake, acknowledge it, reconsider the clues, and continue the game naturally. Encourage the student to explain their reasoning in English.\n" .
       "Do not reveal the final solution unless explicitly asked.\n" .
