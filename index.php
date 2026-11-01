@@ -80,6 +80,30 @@ ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
+$programSelectorAllowedOrigins = [
+    'https://english-with-anna-ai-1023185279452.us-west1.run.app',
+    'https://english-with-anna-ai.ai.studio',
+];
+$programSelectorOrigin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
+$programSelectorOriginAllowed = in_array($programSelectorOrigin, $programSelectorAllowedOrigins, true);
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'OPTIONS' &&
+    (string)($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] ?? '') === 'POST'
+) {
+    if (!$programSelectorOriginAllowed) {
+        http_response_code(403);
+        exit;
+    }
+    header('Access-Control-Allow-Origin: ' . $programSelectorOrigin);
+    header('Vary: Origin');
+    header('Access-Control-Allow-Methods: POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    header('Access-Control-Max-Age: 600');
+    http_response_code(204);
+    exit;
+}
+
 // 1. get_user
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
@@ -199,6 +223,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['get_user'])) {
 // --- Telegram ---
 // Program Selector notifications: accept only structured, validated events.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event'])) {
+    if ($programSelectorOrigin !== '' && !$programSelectorOriginAllowed) {
+        http_response_code(403);
+        echo 'origin_not_allowed';
+        exit;
+    }
+    if ($programSelectorOriginAllowed) {
+        header('Access-Control-Allow-Origin: ' . $programSelectorOrigin);
+        header('Vary: Origin');
+    }
+
     rl_main_or_429('program_selector', 6, 60, 1500);
 
     $rejectProgramSelector = static function(): void {
