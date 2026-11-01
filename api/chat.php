@@ -403,10 +403,10 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     : 'Write analysis explanations in Russian.';
 
   $strictLine = $strictness === 'friendly'
-    ? 'Strictness: friendly (only important errors that block understanding).'
+    ? 'Strictness: friendly. Detect and correct every clear grammar error, but keep explanations short, kind, and simple.'
     : ($strictness === 'strict'
-      ? 'Strictness: strict (detailed corrections including naturalness, but do not invent mistakes).'
-      : 'Strictness: normal (main grammar/vocabulary/naturalness issues).');
+      ? 'Strictness: strict. Detect and correct every clear grammar error, with more detailed explanations including style and naturalness, but do not invent mistakes.'
+      : 'Strictness: normal. Detect and correct every clear grammar error and give a standard explanation of the main grammar, vocabulary, and naturalness issues.');
 
   $imageLine = $hasImage ? "An image may be attached to the last user message. Treat it as additional context inside the CURRENT selected topic (do not switch topics). Use it to answer naturally without describing it unless that helps the conversation. If the image is unclear, ask clarifying questions and do NOT invent details." : "";
 
@@ -475,8 +475,11 @@ function build_system_prompt(string $topicId, string $level, string $analysisLan
     $wordleLine .
     $topicImageLine .
     "ANALYSIS RULES:\n" .
-    "- Teaching English has priority in every topic, including Wordle. Analyze the student's English independently from whether their game reasoning is correct.\n" .
-    "- Praise for a correct game observation must NOT replace language correction. If the last user message contains English errors, set hasErrors=true, provide the corrected wording in naturalAlternative, and list the main grammar/vocabulary issues with short level-appropriate explanations.\n" .
+    "- Teaching English has unconditional priority in every topic, including Wordle. Topic and mode instructions never override these analysis rules. Analyze the student's English independently from whether their game reasoning is correct.\n" .
+    "- In Friendly, Normal, and Strict modes alike, detect and correct every clear grammatical error in the student's last English message. The modes differ only in the tone and detail of the explanation.\n" .
+    "- If any clear grammatical error is present, you MUST set hasErrors=true, return at least one complete issue with a correction and explanation, and provide a non-empty naturalAlternative containing a correct natural English version.\n" .
+    "- Never praise a grammatically incorrect sentence as fully correct. Praise for a correct game observation must NOT replace language correction.\n" .
+    "- Do not invent errors in correct English, and do not mark valid conversational constructions as errors.\n" .
     "- Analyze ONLY the LAST user message from the provided history.\n" .
     "- Do NOT analyze pronunciation.\n" .
     "- Return issues as an array of objects with: type, original, corrected, explanation, example.\n" .
