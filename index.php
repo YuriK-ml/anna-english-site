@@ -285,22 +285,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event'])) {
     }
 
     $age = $cleanSingleLine($readProgramSelectorField('age'));
-    if ($textLength($age) > 24 || preg_match(
-        '/\A(?:(?:[3-9]|[1-9][0-9])(?:\s*(?:лет|год|года))?|(?:[1-9]|1[01])\s*класс|взрослый|взрослая|не указан(?:о|а)?)\z/iu',
-        $age
-    ) !== 1) {
-        $rejectProgramSelector();
-    }
+    if ($age === '' || $textLength($age) > 80) $rejectProgramSelector();
 
     $level = $cleanSingleLine($readProgramSelectorField('level'));
-    $allowedLevels = [
-        'A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2',
-        'beginner', 'elementary', 'pre-intermediate', 'intermediate',
-        'upper-intermediate', 'advanced', 'не указан',
-    ];
-    $levelIsAllowed = preg_match('/\A[ABC][0-2]\z/i', $level) === 1 ||
-        in_array(strtolower($level), $allowedLevels, true);
-    if ($textLength($level) > 24 || !$levelIsAllowed) $rejectProgramSelector();
+    if ($level === '' || $textLength($level) > 80) $rejectProgramSelector();
 
     $goal = $cleanSingleLine($readProgramSelectorField('goal'));
     $course = $cleanSingleLine($readProgramSelectorField('course'));
