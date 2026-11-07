@@ -118,14 +118,11 @@ function load_openai_config(): void {
     return;
   }
 
-  // 3) Common hosting layout: ../private/openai_config.php relative to DOCUMENT_ROOT.
-  $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-  if ($docRoot !== '') {
-    $candidate = realpath($docRoot . '/../private/openai_config.php');
-    if ($candidate && is_file($candidate)) {
-      require $candidate;
-      return;
-    }
+  // 3) Shared private storage (Fornex and legacy hosting).
+  $candidate = realpath(anna_private_dir() . '/openai_config.php');
+  if ($candidate && is_file($candidate)) {
+    require $candidate;
+    return;
   }
 }
 
