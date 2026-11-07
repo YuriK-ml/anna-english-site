@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../private_paths.php';
+
 @ini_set('display_errors', '0');
 @ini_set('log_errors', '1');
 
@@ -71,12 +73,7 @@ function ana_rate_limit_or_429(string $bucket, int $maxPerWindow = 120, int $win
 }
 
 function ana_private_dir(): string {
-  $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-  if ($docRoot !== '') {
-    return $docRoot . '/../private';
-  }
-  // Local fallback: project root ../private
-  return __DIR__ . '/../private';
+  return anna_private_dir();
 }
 
 function ana_db_path(): string {
