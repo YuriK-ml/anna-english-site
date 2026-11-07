@@ -1,6 +1,6 @@
 <?php
 
-define('OPENAI_API_KEY', 'sk-proj-kM.....NwA');
+define('OPENAI_API_KEY', 'REPLACE_WITH_OPENAI_API_KEY');
 # define('OPENAI_TEXT_MODEL', 'gpt-5.6-luna');
 define('OPENAI_TEXT_MODEL', 'gpt-4.1-mini');
 # define('OPENAI_TRANSCRIBE_MODEL', 'gpt-transcribe');    
