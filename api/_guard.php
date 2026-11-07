@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../private_paths.php';
+
 /**
  * Shared helpers for Tutor API endpoints (chat/stt/tts) and auth/admin pages.
  *
@@ -148,14 +150,11 @@ function tutor_load_auth_config(): void {
     return;
   }
 
-  // 3) Hosting layout: ../private/tutor_auth_config.php relative to DOCUMENT_ROOT
-  $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-  if ($docRoot !== '') {
-    $candidate = realpath($docRoot . '/../private/tutor_auth_config.php');
-    if ($candidate && is_file($candidate)) {
-      require $candidate;
-      return;
-    }
+  // 3) Shared private storage (Fornex and legacy hosting).
+  $candidate = realpath(anna_private_dir() . '/tutor_auth_config.php');
+  if ($candidate && is_file($candidate)) {
+    require $candidate;
+    return;
   }
 }
 
@@ -176,13 +175,7 @@ function tutor_pdo(): PDO {
   // If config did not define explicit DB path, use production default.
   $dbPath = defined('TUTOR_DB_PATH') && is_string(constant('TUTOR_DB_PATH')) ? (string)constant('TUTOR_DB_PATH') : '';
   if ($dbPath === '') {
-    $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-    if ($docRoot !== '') {
-      $dbPath = $docRoot . '/../private/tutor.sqlite';
-    } else {
-      // Local fallback (must be explicitly configured for security).
-      tutor_json_respond(500, ['error' => ['code' => 'server_config', 'message' => 'Сервер не настроен (db path).']]);
-    }
+    $dbPath = anna_private_dir() . '/tutor.sqlite';
   }
 
   if (!class_exists('PDO')) {
