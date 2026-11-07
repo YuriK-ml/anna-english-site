@@ -1,7 +1,10 @@
 <?php
 // index.php для korobkovhub.ru / anna.korobkovhub.ru
 
-require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/private_paths.php';
+$telegramConfig = __DIR__ . '/config.php'; // local development
+if (!is_file($telegramConfig)) $telegramConfig = anna_private_dir() . '/config.php';
+require_once $telegramConfig;
 
 
 function client_ip_main(): string {
@@ -64,17 +67,8 @@ function users_db_path(): string {
     $env = (string)getenv('ANNA_USERS_DB');
     if ($env !== '') return $env;
 
-    // 2) Production layout: /public_html/index.php with sibling /private/users.json
-    $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-    if ($docRoot !== '') {
-        $candidate = $docRoot . '/../private/users.json';
-        $realDir = realpath(dirname($candidate));
-        if ($realDir) return $realDir . DIRECTORY_SEPARATOR . 'users.json';
-        return $candidate;
-    }
-
-    // 3) Local fallback
-    return __DIR__ . '/users.json';
+    // 2) Shared private storage (Fornex and legacy hosting).
+    return anna_private_dir() . '/users.json';
 }
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
