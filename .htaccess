@@ -1,6 +1,4 @@
-RewriteEngine On
-RewriteCond %{HTTPS} off
-RewriteRule ^(.*)$ https://anna.korobkovhub.ru/$1 [R=301,L]
+# HTTPS redirect is configured for the active domain in cPanel.
 # Security: do not allow direct download of private files
 <Files "users.json">
   Require all denied
