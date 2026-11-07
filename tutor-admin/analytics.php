@@ -36,11 +36,7 @@ function csrf_check_or_403(): void {
 }
 
 function ana_private_dir(): string {
-  $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
-  if ($docRoot !== '') {
-    return $docRoot . '/../private';
-  }
-  return __DIR__ . '/../private';
+  return anna_private_dir();
 }
 
 function ana_db_path(): string {
