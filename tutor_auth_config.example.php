@@ -2,14 +2,14 @@
 
 // Tutor Auth configuration (EXAMPLE)
 // Place a real copy OUTSIDE public_html, e.g.:
-//   /anna.korobkovhub.ru/private/tutor_auth_config.php
+//   /home/k143221/private/tutor_auth_config.php
 // and point to it via one of the supported mechanisms:
 // - env var TUTOR_PRIVATE_CONFIG
-// - or default lookup: DOCUMENT_ROOT . '/../private/tutor_auth_config.php'
+// - or automatic shared private directory discovery (private_paths.php)
 
 // SQLite DB file path (must be outside public_html).
-// Example for Beget layout:
-// define('TUTOR_DB_PATH', $_SERVER['DOCUMENT_ROOT'] . '/../private/tutor.sqlite');
+// Example for Fornex layout:
+// define('TUTOR_DB_PATH', '/home/k143221/private/tutor.sqlite');
 
 define('TUTOR_DB_PATH', '/ABS/PATH/TO/private/tutor.sqlite');
 
